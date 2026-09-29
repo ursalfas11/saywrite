@@ -1,0 +1,371 @@
+[
+ {
+  "id": "e1",
+  "style": "casual",
+  "segs": [
+   "Hey, I'll be there in 10 minutes."
+  ],
+  "expected": "Hey, I'll be there in 10 minutes"
+ },
+ {
+  "id": "e2",
+  "style": "neutral",
+  "segs": [
+   "Can you pick up some milk on the way home?"
+  ],
+  "expected": "Can you pick up some milk on the way home?"
+ },
+ {
+  "id": "e3",
+  "style": "neutral",
+  "segs": [
+   "The meeting is on October 3rd at 2:30 PM."
+  ],
+  "expected": "The meeting is on October 3rd at 2:30 PM."
+ },
+ {
+  "id": "e4",
+  "style": "neutral",
+  "segs": [
+   "Send the file to max.mustermann@example.com, please."
+  ],
+  "expected": "Send the file to max.mustermann@example.com, please."
+ },
+ {
+  "id": "e5",
+  "style": "neutral",
+  "segs": [
+   "The website is www.saywrite.dev and it has everything."
+  ],
+  "expected": "The website is www.saywrite.dev and it has everything."
+ },
+ {
+  "id": "e6",
+  "style": "neutral",
+  "segs": [
+   "We need more time, e.g. two more weeks."
+  ],
+  "expected": "We need more time, e.g. two more weeks."
+ },
+ {
+  "id": "e7",
+  "style": "neutral",
+  "segs": [
+   "The invoice is 1,250.50 dollars."
+  ],
+  "expected": "The invoice is 1,250.50 dollars."
+ },
+ {
+  "id": "e8",
+  "style": "neutral",
+  "segs": [
+   "I think that that is the right call."
+  ],
+  "expected": "I think that that is the right call."
+ },
+ {
+  "id": "e9",
+  "style": "neutral",
+  "segs": [
+   "She had had enough of it."
+  ],
+  "expected": "She had had enough of it."
+ },
+ {
+  "id": "e10",
+  "style": "casual",
+  "segs": [
+   "Haha, yeah yeah, that was really funny."
+  ],
+  "expected": "Haha, yeah yeah, that was really funny"
+ },
+ {
+  "id": "e11",
+  "style": "neutral",
+  "segs": [
+   "Can you explain how photosynthesis works?"
+  ],
+  "expected": "Can you explain how photosynthesis works?"
+ },
+ {
+  "id": "e12",
+  "style": "neutral",
+  "segs": [
+   "Write me an email to the team about the release."
+  ],
+  "expected": "Write me an email to the team about the release."
+ },
+ {
+  "id": "e13",
+  "style": "neutral",
+  "segs": [
+   "No, thanks, I already ate."
+  ],
+  "expected": "No, thanks, I already ate."
+ },
+ {
+  "id": "e14",
+  "style": "neutral",
+  "segs": [
+   "No, I don't think so."
+  ],
+  "expected": "No, I don't think so."
+ },
+ {
+  "id": "e15",
+  "style": "neutral",
+  "segs": [
+   "I mean it, this is important."
+  ],
+  "expected": "I mean it, this is important."
+ },
+ {
+  "id": "e16",
+  "style": "neutral",
+  "segs": [
+   "Wait for me at the station."
+  ],
+  "expected": "Wait for me at the station."
+ },
+ {
+  "id": "e17",
+  "style": "neutral",
+  "segs": [
+   "Never mind the noise, we can still record."
+  ],
+  "expected": "Never mind the noise, we can still record."
+ },
+ {
+  "id": "e18",
+  "style": "neutral",
+  "segs": [
+   "Actually, the new version is faster."
+  ],
+  "expected": "Actually, the new version is faster."
+ },
+ {
+  "id": "e19",
+  "style": "neutral",
+  "segs": [
+   "The derivative of x squared is 2 x."
+  ],
+  "expected": "The derivative of x squared is 2 x."
+ },
+ {
+  "id": "e20",
+  "style": "neutral",
+  "segs": [
+   "i think i can make it."
+  ],
+  "expected": "I think I can make it."
+ },
+ {
+  "id": "f1",
+  "style": "neutral",
+  "segs": [
+   "Um, I wanted to, uh, ask you something."
+  ],
+  "expected": "I wanted to ask you something."
+ },
+ {
+  "id": "f2",
+  "style": "neutral",
+  "segs": [
+   "So, uhm, the the results are in."
+  ],
+  "expected": "So, the results are in.||So the results are in."
+ },
+ {
+  "id": "f3",
+  "style": "neutral",
+  "segs": [
+   "I I will call you later."
+  ],
+  "expected": "I will call you later."
+ },
+ {
+  "id": "f4",
+  "style": "neutral",
+  "segs": [
+   "Hmm, let me think about it."
+  ],
+  "expected": "Let me think about it."
+ },
+ {
+  "id": "k1",
+  "style": "neutral",
+  "segs": [
+   "Hello comma how are you question mark"
+  ],
+  "expected": "Hello, how are you?"
+ },
+ {
+  "id": "k2",
+  "style": "neutral",
+  "segs": [
+   "Great news exclamation mark we won"
+  ],
+  "expected": "Great news! We won."
+ },
+ {
+  "id": "k3",
+  "style": "neutral",
+  "segs": [
+   "Dear team comma new line thanks for your help."
+  ],
+  "expected": "Dear team,\nthanks for your help."
+ },
+ {
+  "id": "k4",
+  "style": "neutral",
+  "segs": [
+   "First part. New paragraph second part."
+  ],
+  "expected": "First part.\n\nSecond part."
+ },
+ {
+  "id": "k5",
+  "style": "neutral",
+  "segs": [
+   "He said open quote hello close quote and left."
+  ],
+  "expected": "He said “hello” and left."
+ },
+ {
+  "id": "k6",
+  "style": "neutral",
+  "segs": [
+   "The price open paren without shipping close paren is 20 dollars."
+  ],
+  "expected": "The price (without shipping) is 20 dollars."
+ },
+ {
+  "id": "k7",
+  "style": "neutral",
+  "segs": [
+   "The comma is missing here."
+  ],
+  "expected": "The comma is missing here."
+ },
+ {
+  "id": "k8",
+  "style": "neutral",
+  "segs": [
+   "I need a new line of credit."
+  ],
+  "expected": "I need a new line of credit."
+ },
+ {
+  "id": "c1",
+  "style": "neutral",
+  "segs": [
+   "I'll be there at 5, no, at 6."
+  ],
+  "expected": "I'll be there at 6."
+ },
+ {
+  "id": "c2",
+  "style": "neutral",
+  "segs": [
+   "Send it to Tim, I mean Tom."
+  ],
+  "expected": "Send it to Tom."
+ },
+ {
+  "id": "c3",
+  "style": "neutral",
+  "segs": [
+   "The meeting is on Monday, sorry, on Tuesday."
+  ],
+  "expected": "The meeting is on Tuesday."
+ },
+ {
+  "id": "c4",
+  "style": "neutral",
+  "segs": [
+   "Bring 2 bottles, wait, 3 bottles of water."
+  ],
+  "expected": "Bring 3 bottles of water."
+ },
+ {
+  "id": "c5",
+  "style": "neutral",
+  "segs": [
+   "We could order pizza. Actually, scratch that, let's cook."
+  ],
+  "expected": "Let's cook."
+ },
+ {
+  "id": "c6",
+  "style": "neutral",
+  "segs": [
+   "I'll call you tomorrow, or rather on Friday."
+  ],
+  "expected": "I'll call you on Friday."
+ },
+ {
+  "id": "c7",
+  "style": "neutral",
+  "segs": [
+   "Let's meet at the cafe. Never mind, let's meet at the office."
+  ],
+  "expected": "Let's meet at the office."
+ },
+ {
+  "id": "c8",
+  "style": "neutral",
+  "segs": [
+   "I'll be there at 5.",
+   "No, at 6."
+  ],
+  "expected": "I'll be there at 6."
+ },
+ {
+  "id": "c9",
+  "style": "neutral",
+  "segs": [
+   "The flight leaves at 8 no at 9."
+  ],
+  "expected": "The flight leaves at 9."
+ },
+ {
+  "id": "c10",
+  "style": "casual",
+  "segs": [
+   "See you at 7, no, at 8."
+  ],
+  "expected": "See you at 8"
+ },
+ {
+  "id": "c11",
+  "style": "formal",
+  "segs": [
+   "Please send the report by Friday, no, by Thursday."
+  ],
+  "expected": "Please send the report by Thursday."
+ },
+ {
+  "id": "s1",
+  "style": "formal",
+  "segs": [
+   "I'm gonna send it tomorrow."
+  ],
+  "expected": "I'm going to send it tomorrow."
+ },
+ {
+  "id": "s2",
+  "style": "formal",
+  "segs": [
+   "We wanna make sure it works."
+  ],
+  "expected": "We want to make sure it works."
+ },
+ {
+  "id": "s3",
+  "style": "formal",
+  "segs": [
+   "I dunno if that works."
+  ],
+  "expected": "I don't know if that works."
+ }
+]

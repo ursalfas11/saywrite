@@ -1,0 +1,861 @@
+[
+{
+"id": "e1",
+"style": "casual",
+"segs": [
+"Hey, bin in 10 Minuten da."
+],
+"expected": "Hey, bin in 10 Minuten da"
+},
+{
+"id": "e2",
+"style": "casual",
+"segs": [
+"Kannst du bitte noch Milch mitbringen?"
+],
+"expected": "Kannst du bitte noch Milch mitbringen?"
+},
+{
+"id": "e3",
+"style": "neutral",
+"segs": [
+"Ich bin heute Abend nicht zu Hause. Wir sehen uns morgen."
+],
+"expected": "Ich bin heute Abend nicht zu Hause. Wir sehen uns morgen."
+},
+{
+"id": "e4",
+"style": "casual",
+"segs": [
+"Haha, ja ja, das war echt lustig."
+],
+"expected": "Haha, ja ja, das war echt lustig"
+},
+{
+"id": "e5",
+"style": "neutral",
+"segs": [
+"Treffen wir uns am 3. Oktober um 14:30 Uhr?"
+],
+"expected": "Treffen wir uns am 3. Oktober um 14:30 Uhr?"
+},
+{
+"id": "e5b",
+"style": "neutral",
+"segs": [
+"Die Frist ist der 15. des Monats."
+],
+"expected": "Die Frist ist der 15. des Monats."
+},
+{
+"id": "e6",
+"style": "neutral",
+"segs": [
+"Die Rechnung beträgt 1.250,50 Euro."
+],
+"expected": "Die Rechnung beträgt 1.250,50 Euro."
+},
+{
+"id": "e7",
+"style": "neutral",
+"segs": [
+"Schick mir die Datei an max.mustermann@example.com, bitte."
+],
+"expected": "Schick mir die Datei an max.mustermann@example.com, bitte."
+},
+{
+"id": "e8",
+"style": "neutral",
+"segs": [
+"Die Seite ist www.saywrite.de und dort findest du alles."
+],
+"expected": "Die Seite ist www.saywrite.de und dort findest du alles."
+},
+{
+"id": "e9",
+"style": "neutral",
+"segs": [
+"Das Meeting ist um 9.30 Uhr."
+],
+"expected": "Das Meeting ist um 9.30 Uhr."
+},
+{
+"id": "e10",
+"style": "casual",
+"segs": [
+"Kannst du mir den Pull Request reviewen? Das Feature ist ready."
+],
+"expected": "Kannst du mir den Pull Request reviewen? Das Feature ist ready."
+},
+{
+"id": "e11",
+"style": "neutral",
+"segs": [
+"Sag Frau Müller-Lüdenscheidt, dass Dr. Schmidt später kommt."
+],
+"expected": "Sag Frau Müller-Lüdenscheidt, dass Dr. Schmidt später kommt."
+},
+{
+"id": "e12",
+"style": "neutral",
+"segs": [
+"Wir brauchen z. B. mehr Zeit."
+],
+"expected": "Wir brauchen z. B. mehr Zeit."
+},
+{
+"id": "e13",
+"style": "neutral",
+"segs": [
+"Bring Obst, Gemüse usw. mit."
+],
+"expected": "Bring Obst, Gemüse usw. mit."
+},
+{
+"id": "e14",
+"style": "neutral",
+"segs": [
+"Geh auf github.com/saywrite und lade die App herunter."
+],
+"expected": "Geh auf github.com/saywrite und lade die App herunter."
+},
+{
+"id": "e15",
+"style": "neutral",
+"segs": [
+"Wir treffen uns ca. um 8 am Bahnhof."
+],
+"expected": "Wir treffen uns ca. um 8 am Bahnhof."
+},
+{
+"id": "e16",
+"style": "casual",
+"segs": [
+"Let's meet tomorrow at 10."
+],
+"expected": "Let's meet tomorrow at 10"
+},
+{
+"id": "f1",
+"style": "formal",
+"segs": [
+"Sehr geehrte Frau Schneider, neue Zeile vielen Dank für Ihre Nachricht. Neuer Absatz Mit freundlichen Grüßen neue Zeile Max Mustermann"
+],
+"expected": "Sehr geehrte Frau Schneider,\nvielen Dank für Ihre Nachricht.\n\nMit freundlichen Grüßen\nMax Mustermann||Sehr geehrte Frau Schneider,\nvielen Dank für Ihre Nachricht.\n\nMit freundlichen Grüßen\nMax Mustermann."
+},
+{
+"id": "f2",
+"style": "formal",
+"segs": [
+"Hallo Herr Weber, ich hab die Unterlagen gestern verschickt und hoffe, sie sind angekommen."
+],
+"expected": "Hallo Herr Weber, ich habe die Unterlagen gestern verschickt und hoffe, sie sind angekommen."
+},
+{
+"id": "f3",
+"style": "formal",
+"segs": [
+"Ich kann morgen nicht, gibts eine Alternative?"
+],
+"expected": "Ich kann morgen nicht, gibt es eine Alternative?"
+},
+{
+"id": "f4",
+"style": "formal",
+"segs": [
+"Das is nich so schlimm."
+],
+"expected": "Das ist nicht so schlimm."
+},
+{
+"id": "f5",
+"style": "formal",
+"segs": [
+"Wir ham nen Termin am Montag."
+],
+"expected": "Wir haben einen Termin am Montag."
+},
+{
+"id": "f6",
+"style": "formal",
+"segs": [
+"ich wollte Ihnen nur kurz mitteilen dass wir das Projekt wie besprochen bis Ende des Monats abschließen werden und die Rechnung dann direkt im Anschluss an Sie schicken"
+],
+"expected": "Ich wollte Ihnen nur kurz mitteilen, dass wir das Projekt wie besprochen bis Ende des Monats abschließen werden und die Rechnung dann direkt im Anschluss an Sie schicken.||Ich wollte Ihnen nur kurz mitteilen, dass wir das Projekt, wie besprochen, bis Ende des Monats abschließen werden und die Rechnung dann direkt im Anschluss an Sie schicken."
+},
+{
+"id": "f7",
+"style": "formal",
+"segs": [
+"Kannste mir das schicken?"
+],
+"expected": "Kannst du mir das schicken?"
+},
+{
+"id": "f8",
+"style": "formal",
+"segs": [
+"Nen schönen Tag noch."
+],
+"expected": "Einen schönen Tag noch."
+},
+{
+"id": "f9",
+"style": "formal",
+"segs": [
+"Hab's gestern schon erledigt, is kein Problem."
+],
+"expected": "Habe es gestern schon erledigt, ist kein Problem."
+},
+{
+"id": "f10",
+"style": "formal",
+"segs": [
+"Ich würd gern wissen, ob das klappt."
+],
+"expected": "Ich würde gern wissen, ob das klappt."
+},
+{
+"id": "c1",
+"style": "neutral",
+"segs": [
+"Ich komme um 5, nein, um 6."
+],
+"expected": "Ich komme um 6."
+},
+{
+"id": "c2",
+"style": "neutral",
+"segs": [
+"Wir treffen uns am Dienstag, nee, am Mittwoch im Büro."
+],
+"expected": "Wir treffen uns am Mittwoch im Büro."
+},
+{
+"id": "c3",
+"style": "neutral",
+"segs": [
+"Schick das an Peter, ich meine an Paul."
+],
+"expected": "Schick das an Paul."
+},
+{
+"id": "c4",
+"style": "neutral",
+"segs": [
+"Der Termin ist um 10 Uhr, besser gesagt um halb 11."
+],
+"expected": "Der Termin ist um halb 11."
+},
+{
+"id": "c5",
+"style": "neutral",
+"segs": [
+"Bring bitte 2 Flaschen Wasser, Moment, 3 Flaschen Wasser mit."
+],
+"expected": "Bring bitte 3 Flaschen Wasser mit."
+},
+{
+"id": "c6",
+"style": "neutral",
+"segs": [
+"Ich komme um fünf.",
+"Nein, um sechs."
+],
+"expected": "Ich komme um sechs."
+},
+{
+"id": "c7",
+"style": "neutral",
+"segs": [
+"Wir fahren am Samstag nach Berlin. Nein, am Sonntag."
+],
+"expected": "Wir fahren am Sonntag nach Berlin."
+},
+{
+"id": "c8",
+"style": "neutral",
+"segs": [
+"Kauf bitte Brot und Butter. Vergiss das, ich gehe selbst einkaufen."
+],
+"expected": "Ich gehe selbst einkaufen."
+},
+{
+"id": "c9",
+"style": "neutral",
+"segs": [
+"Das Budget liegt bei 5000 Euro, nee, warte, bei 7000 Euro."
+],
+"expected": "Das Budget liegt bei 7000 Euro."
+},
+{
+"id": "c10",
+"style": "neutral",
+"segs": [
+"Ich brauche den Bericht bis Montag, nein, bis Dienstag, und die Präsentation bis Mittwoch, ich meine Donnerstag."
+],
+"expected": "Ich brauche den Bericht bis Dienstag und die Präsentation bis Donnerstag.||Ich brauche den Bericht bis Dienstag, und die Präsentation bis Donnerstag."
+},
+{
+"id": "c11",
+"style": "neutral",
+"segs": [
+"Ich komme um 5 nein um 6."
+],
+"expected": "Ich komme um 6."
+},
+{
+"id": "c12",
+"style": "neutral",
+"segs": [
+"Ruf mich morgen an, also nein, übermorgen."
+],
+"expected": "Ruf mich übermorgen an."
+},
+{
+"id": "c13",
+"style": "neutral",
+"segs": [
+"Wir sind 4 Leute, quatsch, 5 Leute."
+],
+"expected": "Wir sind 5 Leute."
+},
+{
+"id": "c14",
+"style": "neutral",
+"segs": [
+"Die Adresse ist Hauptstraße 12. Ach nein, Hauptstraße 21."
+],
+"expected": "Die Adresse ist Hauptstraße 21."
+},
+{
+"id": "c15",
+"style": "neutral",
+"segs": [
+"Nimm den roten Pullover, oder besser den blauen."
+],
+"expected": "Nimm den blauen Pullover."
+},
+{
+"id": "c16",
+"style": "casual",
+"segs": [
+"Bin um 8 da, nee, um halb 9."
+],
+"expected": "Bin um halb 9 da"
+},
+{
+"id": "c17",
+"style": "neutral",
+"segs": [
+"Ich schreibe dir später. Moment, ich rufe dich lieber an."
+],
+"expected": "Ich rufe dich lieber an."
+},
+{
+"id": "c18",
+"style": "neutral",
+"segs": [
+"Er heißt Thomas, Korrektur: Tobias."
+],
+"expected": "Er heißt Tobias."
+},
+{
+"id": "c19",
+"style": "neutral",
+"segs": [
+"Wir kommen um 7. Streich das, wir kommen um 8."
+],
+"expected": "Wir kommen um 8."
+},
+{
+"id": "c20",
+"style": "neutral",
+"segs": [
+"Ich hätte gern einen Kaffee, nein, einen Tee, nein, doch einen Kaffee."
+],
+"expected": "Ich hätte gern doch einen Kaffee.||Ich hätte gern einen Kaffee."
+},
+{
+"id": "c21",
+"style": "neutral",
+"segs": [
+"Das Meeting ist am Donnerstag,",
+"+nein, am Freitag um 10."
+],
+"expected": "Das Meeting ist am Freitag um 10."
+},
+{
+"id": "c22",
+"style": "neutral",
+"segs": [
+"Schick die Mail an Anna.",
+"Ich meine, an Lena."
+],
+"expected": "Schick die Mail an Lena."
+},
+{
+"id": "c23",
+"style": "neutral",
+"segs": [
+"Meine Nummer ist 0171 2345678, nein, 0171 2345679."
+],
+"expected": "Meine Nummer ist 0171 2345679."
+},
+{
+"id": "c24",
+"style": "neutral",
+"segs": [
+"Ich fliege am 12., nein, am 14. Oktober nach Rom."
+],
+"expected": "Ich fliege am 14. Oktober nach Rom."
+},
+{
+"id": "c25",
+"style": "neutral",
+"segs": [
+"Das Treffen ist in Raum 3, ähm, nein, Raum 4."
+],
+"expected": "Das Treffen ist in Raum 4.||Das Treffen ist in Raum 4"
+},
+{
+"id": "c26",
+"style": "casual",
+"segs": [
+"Wir brauchen 10 Stühle, äh, nee, 12 Stühle."
+],
+"expected": "Wir brauchen 12 Stühle"
+},
+{
+"id": "c28",
+"style": "neutral",
+"segs": [
+"Der Zug fährt um 3, nein warte, um 4."
+],
+"expected": "Der Zug fährt um 4."
+},
+{
+"id": "c29",
+"style": "neutral",
+"segs": [
+"Ich komme am Montag. Äh, nee, am Dienstag."
+],
+"expected": "Ich komme am Dienstag."
+},
+{
+"id": "c30",
+"style": "neutral",
+"segs": [
+"Ich nehme die Pizza. Oder nein, doch lieber die Pasta."
+],
+"expected": "Ich nehme doch lieber die Pasta.||Ich nehme lieber die Pasta."
+},
+{
+"id": "c31",
+"style": "neutral",
+"segs": [
+"Wir sehen uns um acht. Sorry, ich meine um neun."
+],
+"expected": "Wir sehen uns um neun."
+},
+{
+"id": "c33",
+"style": "neutral",
+"segs": [
+"Schick es an Tim, sorry, an Tom."
+],
+"expected": "Schick es an Tom."
+},
+{
+"id": "c34",
+"style": "neutral",
+"segs": [
+"Das Meeting ist am Montag. Ich meine natürlich Dienstag."
+],
+"expected": "Das Meeting ist am Dienstag.||Das Meeting ist natürlich am Dienstag."
+},
+{
+"id": "c35",
+"style": "neutral",
+"segs": [
+"Der Preis ist 50 Euro, nein, Entschuldigung, 60 Euro."
+],
+"expected": "Der Preis ist 60 Euro."
+},
+{
+"id": "c36",
+"style": "formal",
+"segs": [
+"Ich sende Ihnen die Unterlagen bis Freitag, nein, bis Donnerstag zu."
+],
+"expected": "Ich sende Ihnen die Unterlagen bis Donnerstag zu."
+},
+{
+"id": "c37",
+"style": "neutral",
+"segs": [
+"Die Lösung ist x gleich 4, nein, x gleich minus 4."
+],
+"expected": "Die Lösung ist x gleich minus 4."
+},
+{
+"id": "n1",
+"style": "neutral",
+"segs": [
+"Nein, das stimmt so nicht."
+],
+"expected": "Nein, das stimmt so nicht."
+},
+{
+"id": "n2",
+"style": "neutral",
+"segs": [
+"Danke für die Einladung. Nein, am Montag kann ich leider nicht."
+],
+"expected": "Danke für die Einladung. Nein, am Montag kann ich leider nicht."
+},
+{
+"id": "n3",
+"style": "neutral",
+"segs": [
+"Erklär mir, wie ein Verbrennungsmotor funktioniert."
+],
+"expected": "Erklär mir, wie ein Verbrennungsmotor funktioniert."
+},
+{
+"id": "n4",
+"style": "formal",
+"segs": [
+"kannst du mir erklären wie genau die Photosynthese bei Pflanzen funktioniert und welche Rolle dabei das Chlorophyll und das Sonnenlicht spielen und warum Blätter im Herbst ihre Farbe ändern"
+],
+"expected": "Kannst du mir erklären, wie genau die Photosynthese bei Pflanzen funktioniert und welche Rolle dabei das Chlorophyll und das Sonnenlicht spielen und warum Blätter im Herbst ihre Farbe ändern?"
+},
+{
+"id": "n5",
+"style": "neutral",
+"segs": [
+"Ich finde den Plan gut. Ich meine, dass wir trotzdem mehr Zeit brauchen."
+],
+"expected": "Ich finde den Plan gut. Ich meine, dass wir trotzdem mehr Zeit brauchen."
+},
+{
+"id": "n6",
+"style": "neutral",
+"segs": [
+"Was ich meine, ist ganz einfach."
+],
+"expected": "Was ich meine, ist ganz einfach."
+},
+{
+"id": "n7",
+"style": "neutral",
+"segs": [
+"Das habe ich, ich meine das ernst, schon dreimal gesagt."
+],
+"expected": "Das habe ich, ich meine das ernst, schon dreimal gesagt."
+},
+{
+"id": "n9",
+"style": "neutral",
+"segs": [
+"Er sagte, nein, das mache ich nicht."
+],
+"expected": "Er sagte, nein, das mache ich nicht."
+},
+{
+"id": "n10",
+"style": "casual",
+"segs": [
+"Das ist doch super, ne, dass du kommst?"
+],
+"expected": "Das ist doch super, ne, dass du kommst?"
+},
+{
+"id": "n11",
+"style": "neutral",
+"segs": [
+"x hoch 2 minus 3 ist gleich 6."
+],
+"expected": "x hoch 2 minus 3 ist gleich 6.||X hoch 2 minus 3 ist gleich 6."
+},
+{
+"id": "n13",
+"style": "neutral",
+"segs": [
+"Einkaufsliste Doppelpunkt Eier Komma Milch Komma Mehl und Zucker."
+],
+"expected": "Einkaufsliste: Eier, Milch, Mehl und Zucker."
+},
+{
+"id": "n15",
+"style": "neutral",
+"segs": [
+"Der Wert liegt bei 2 Komma 5 Prozent."
+],
+"expected": "Der Wert liegt bei 2,5 Prozent."
+},
+{
+"id": "n16",
+"style": "neutral",
+"segs": [
+"Wir haben zwei Komma fünf Millionen Umsatz."
+],
+"expected": "Wir haben zwei Komma fünf Millionen Umsatz."
+},
+{
+"id": "n17",
+"style": "neutral",
+"segs": [
+"Setz hier ein Komma, bitte."
+],
+"expected": "Setz hier ein Komma, bitte."
+},
+{
+"id": "n19",
+"style": "neutral",
+"segs": [
+"Wie spät ist es in New York?"
+],
+"expected": "Wie spät ist es in New York?"
+},
+{
+"id": "n23",
+"style": "neutral",
+"segs": [
+"Ich glaube, dass das das Beste ist."
+],
+"expected": "Ich glaube, dass das das Beste ist."
+},
+{
+"id": "n26",
+"style": "neutral",
+"segs": [
+"Nein, nein, nein, so geht das nicht."
+],
+"expected": "Nein, nein, nein, so geht das nicht."
+},
+{
+"id": "n28",
+"style": "neutral",
+"segs": [
+"Gute Frage. Warte, ich schau mal nach."
+],
+"expected": "Gute Frage. Warte, ich schau mal nach."
+},
+{
+"id": "n29",
+"style": "neutral",
+"segs": [
+"Du hast gesagt, es kostet 50 Euro. Moment mal, das stimmt doch nicht."
+],
+"expected": "Du hast gesagt, es kostet 50 Euro. Moment mal, das stimmt doch nicht."
+},
+{
+"id": "n30",
+"style": "neutral",
+"segs": [
+"Wir fahren um 8 los. Vergiss das Ladekabel nicht!"
+],
+"expected": "Wir fahren um 8 los. Vergiss das Ladekabel nicht!"
+},
+{
+"id": "n31",
+"style": "neutral",
+"segs": [
+"Ich hab dir die Bilder geschickt. Lösch das alte Foto bitte."
+],
+"expected": "Ich hab dir die Bilder geschickt. Lösch das alte Foto bitte."
+},
+{
+"id": "n32",
+"style": "casual",
+"segs": [
+"Bin gleich da. Warte kurz."
+],
+"expected": "Bin gleich da. Warte kurz."
+},
+{
+"id": "n33",
+"style": "neutral",
+"segs": [
+"Meine PIN ist 1 1 2 2."
+],
+"expected": "Meine PIN ist 1 1 2 2."
+},
+{
+"id": "n34",
+"style": "neutral",
+"segs": [
+"Die Antwort ist nein, und dabei bleibt es."
+],
+"expected": "Die Antwort ist nein, und dabei bleibt es."
+},
+{
+"id": "n35",
+"style": "neutral",
+"segs": [
+"Nee, lass mal, ich mach das morgen."
+],
+"expected": "Nee, lass mal, ich mach das morgen."
+},
+{
+"id": "s1",
+"style": "neutral",
+"segs": [
+"Ähm, ich wollte, äh, fragen, ob du morgen Zeit hast."
+],
+"expected": "Ich wollte fragen, ob du morgen Zeit hast."
+},
+{
+"id": "s2",
+"style": "neutral",
+"segs": [
+"Also, ähm, das ist, äh, eigentlich ganz einfach."
+],
+"expected": "Also, das ist eigentlich ganz einfach."
+},
+{
+"id": "s3",
+"style": "neutral",
+"segs": [
+"Ich ich ich weiß nicht."
+],
+"expected": "Ich weiß nicht."
+},
+{
+"id": "s5",
+"style": "neutral",
+"segs": [
+"Das ist der der beste Plan."
+],
+"expected": "Das ist der beste Plan."
+},
+{
+"id": "s6",
+"style": "casual",
+"segs": [
+"Hmm, lass mich kurz überlegen."
+],
+"expected": "Lass mich kurz überlegen"
+},
+{
+"id": "s7",
+"style": "neutral",
+"segs": [
+"Das ist, ähm, ähm, schwierig."
+],
+"expected": "Das ist schwierig."
+},
+{
+"id": "s10",
+"style": "neutral",
+"segs": [
+"Em, kannst du mir helfen?"
+],
+"expected": "Kannst du mir helfen?"
+},
+{
+"id": "s13",
+"style": "neutral",
+"segs": [
+"Ich glaube ich glaube, das passt."
+],
+"expected": "Ich glaube, das passt."
+},
+{
+"id": "k1",
+"style": "casual",
+"segs": [
+"Hallo Anna Komma wie geht es dir Fragezeichen"
+],
+"expected": "Hallo Anna, wie geht es dir?"
+},
+{
+"id": "k2",
+"style": "casual",
+"segs": [
+"Liebe Grüße Ausrufezeichen"
+],
+"expected": "Liebe Grüße!"
+},
+{
+"id": "k3",
+"style": "neutral",
+"segs": [
+"Er sagte Anführungszeichen ich komme morgen Anführungszeichen und ging."
+],
+"expected": "Er sagte „ich komme morgen“ und ging."
+},
+{
+"id": "k4",
+"style": "neutral",
+"segs": [
+"Das Treffen Klammer auf wahrscheinlich am Montag Klammer zu ist wichtig."
+],
+"expected": "Das Treffen (wahrscheinlich am Montag) ist wichtig."
+},
+{
+"id": "k5",
+"style": "neutral",
+"segs": [
+"Erster Punkt neue Zeile zweiter Punkt neue Zeile dritter Punkt"
+],
+"expected": "Erster Punkt\nZweiter Punkt\nDritter Punkt||Erster Punkt.\nZweiter Punkt.\nDritter Punkt."
+},
+{
+"id": "k6",
+"style": "neutral",
+"segs": [
+"Hallo zusammen, neuer Absatz, heute geht es um das Budget."
+],
+"expected": "Hallo zusammen,\n\nheute geht es um das Budget."
+},
+{
+"id": "k7",
+"style": "casual",
+"segs": [
+"Hallo Anna, Komma, wie geht's?"
+],
+"expected": "Hallo Anna, wie geht's?"
+},
+{
+"id": "k9",
+"style": "neutral",
+"segs": [
+"Wie geht's dir. Fragezeichen."
+],
+"expected": "Wie geht's dir?"
+},
+{
+"id": "k12",
+"style": "neutral",
+"segs": [
+"Bitte eine neue Zeile einfügen."
+],
+"expected": "Bitte eine neue Zeile einfügen."
+},
+{
+"id": "k14",
+"style": "neutral",
+"segs": [
+"Er schrieb Doppelpunkt Anführungszeichen Hallo Anführungszeichen"
+],
+"expected": "Er schrieb: „Hallo“."
+},
+{
+"id": "k16",
+"style": "neutral",
+"segs": [
+"Danke. Neuer Absatz. Bis bald."
+],
+"expected": "Danke.\n\nBis bald."
+},
+{
+"id": "k17",
+"style": "neutral",
+"segs": [
+"Das kostet 20 Euro Klammer auf ohne Versand Klammer zu."
+],
+"expected": "Das kostet 20 Euro (ohne Versand)."
+}
+]
