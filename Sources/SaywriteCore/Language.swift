@@ -38,6 +38,7 @@ public enum DictationLanguage: String, CaseIterable, Sendable {
         "your", "me", "tomorrow", "today", "do", "don't", "i'm", "it's", "there", "they", "would", "could",
         "yeah", "yes", "hey", "hello", "really", "very", "some", "about", "from", "if", "when", "then", "here",
         "thank", "sorry", "no", "should", "need", "want", "part", "let's", "i'll", "we're", "you're", "ok",
+        "uh", "good", "great", "sounds", "got", "cheers", "sure", "see", "okay", "hi", "dear", "thanks",
     ]
 
     /// Stop-word vote; nil when the text is too short or ambiguous.
@@ -51,7 +52,8 @@ public enum DictationLanguage: String, CaseIterable, Sendable {
             if germanMarkers.contains(word) { german += 1 }
             if englishMarkers.contains(word) { english += 1 }
         }
-        if "äöüß".contains(where: { text.lowercased().contains($0) }) { german += 1 }
+        // Umlauts in lowercase words (not in German names like "Müller" inside English text).
+        if text.range(of: #"(?<![\p{L}])\p{Ll}*[äöüß]\p{Ll}*"#, options: .regularExpression) != nil { german += 1 }
         guard german != english else { return nil }
         return german > english ? .german : .english
     }

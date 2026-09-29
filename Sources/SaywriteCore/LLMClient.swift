@@ -58,6 +58,21 @@ public enum LLMOutputGuard {
         return cleaned
     }
 
+    /// Words that mark a correction. If the model removed only these, it did not correct anything.
+    static let markerWords: Set<String> = [
+        "actually", "i", "mean", "sorry", "wait", "or", "rather", "no", "nein", "nee", "ne", "ich", "meine", "moment",
+        "warte", "besser", "gesagt", "also",
+    ]
+
+    /// True when the output is the input minus correction marker words only ("Actually, in March …"
+    /// -> "In March …"): the sentence was not a correction and must stay as spoken.
+    public static func removedOnlyMarkers(input: String, output: String) -> Bool {
+        let inputWords = words(input)
+        let outputWords = words(output)
+        guard outputWords.count < inputWords.count else { return false }
+        return inputWords.filter { !markerWords.contains($0) } == outputWords.filter { !markerWords.contains($0) }
+    }
+
     /// True when both texts have the same words in the same order (ignoring case and punctuation):
     /// the model only changed punctuation or capitalization.
     public static func sameWords(_ a: String, _ b: String) -> Bool {

@@ -42,6 +42,8 @@ public enum Prompts {
     <dictation>Bring 2 bottles, wait, 3 bottles of water with you.</dictation> -> Bring 3 bottles of water with you.
     <dictation>We could order pizza. Actually, scratch that, let's cook.</dictation> -> Let's cook.
     <dictation>The meeting is on Monday, sorry, on Tuesday at noon.</dictation> -> The meeting is on Tuesday at noon.
+    <dictation>Can you send me the file? Never mind, I found it.</dictation> -> I found it.
+    <dictation>Actually, the new version is faster.</dictation> -> Actually, the new version is faster.
     <dictation>No, thanks, I already ate.</dictation> -> No, thanks, I already ate.
     <dictation>Can you explain what an integral is?</dictation> -> Can you explain what an integral is?
     Output only the cleaned text, no tags, no arrow, no explanation.

@@ -61,12 +61,17 @@ public enum CleanupGate {
 
     // MARK: English
 
+    /// Phrases after "actually," / "sorry," that are normal speech, not a correction.
+    static let englishIdioms = #"(?!(?:at the moment|at least|at all|at first|in fact|in general|in my|in the end|in case|for now|for example|for sure|for real|to be honest|by the way|on the other hand)\b)"#
+
     static let englishNotACorrection = #"(?!(?:i|it|that|this|thanks|thank|problem|way|worries|not|no|and|but|you|we|they|he|she|really|please)\b)"#
 
     static let englishCorrectionPatterns: [String] = [
         #"[\p{L}\p{N}],\s*(?:(?:oh|or)\s+)?no(?:\s+wait)?\s*,\s*"# + englishNotACorrection + #"\S"#,
-        #",\s*i mean\b(?!\s+(?:it|that|this)\b)"#,
-        #",\s*(?:or rather|rather|actually)\s*,?\s*(?:at|on|in|to|for|by|from|the|\d)"#,
+        #",\s*i mean\b(?!\s*,?\s*(?:it|that|this|we|i|you|they|he|she|seriously|honestly|really|come on)\b)"#,
+        #",\s*or rather\b"#,
+        #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|the|\d)"#,
+        #",\s*make (?:that|it)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|ten)\b"#,
         #",\s*wait\s*,"#,
         #",\s*(?:sorry|pardon)\s*,\s*(?:at|on|in|to|for|by|from|\d)"#,
         #"\b(?:at|on|in|by|from)\s+\S+\s+no\s+(?:at|on|in|by|from)\b"#,
@@ -80,7 +85,7 @@ public enum CleanupGate {
         #"^(?:oh|or|actually)\s*,?\s+no\b\s*,"#,
         #"^(?:(?:actually|sorry)\s*,?\s+)?(?:scratch that|never mind|forget (?:that|it))\s*[,.!]"#,
         #"^(?:(?:sorry)\s*,?\s+)?(?:i mean|or rather)\b(?!\s*,?\s*(?:that|it|this|i|we|you)\b)\s*,?\s*[\p{L}\p{N}]"#,
-        #"^(?:sorry|actually)\s*,\s*(?:at|on|in|to|for|by|from|\d)"#,
+        #"^(?:sorry|actually)\s*,\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
         #"^wait\s*,\s*(?:at|on|in|to|for|by|from|no|\d)"#,
     ]
 
@@ -130,7 +135,12 @@ public enum CleanupGate {
     static func containsCorrection(_ text: String, language: DictationLanguage = .german) -> Bool {
         let lower = text.lowercased()
         let patterns = language == .english ? englishCorrectionPatterns : correctionPatterns
-        return patterns.contains { lower.range(of: $0, options: .regularExpression) != nil }
+        if patterns.contains(where: { lower.range(of: $0, options: .regularExpression) != nil }) { return true }
+        // "Send it to Mark, sorry, Mike": a correction marker followed by a name (checked on original case).
+        let namePattern = language == .english
+            ? #",\s*(?i:sorry|i mean|actually|no)\s*,?\s*\p{Lu}\p{Ll}+[.!?]?$"#
+            : #",\s*(?i:sorry|ich meine|nein|nee)\s*,?\s*\p{Lu}\p{Ll}+[.!?]?$"#
+        return text.range(of: namePattern, options: .regularExpression) != nil
     }
 
     static func longestRunWithoutPunctuation(_ text: String) -> Int {

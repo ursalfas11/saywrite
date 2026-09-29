@@ -159,7 +159,9 @@ public actor DictationSession {
                     let improved = try await llm.cleanup(text: combined, style: style, language: language)
                     Debug.log("llm (with previous sentence): \(combined) -> \(improved)")
                     // Returning only the discarded sentence means the model misunderstood.
-                    guard !LLMOutputGuard.sameWords(improved, previous) else { throw LLMError.rejectedOutput }
+                    guard !LLMOutputGuard.sameWords(improved, previous),
+                          !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved)
+                    else { throw LLMError.rejectedOutput }
                     output.append(RuleCleaner.clean(improved, language: language))
                     usedLLM = true
                 } catch {
@@ -184,6 +186,7 @@ public actor DictationSession {
                 Debug.log("llm: \(unit) -> \(improved)")
                 // Without a correction the model may only add punctuation; changed words fall back.
                 guard isCorrection || LLMOutputGuard.sameWords(unit, improved) else { throw LLMError.rejectedOutput }
+                guard !LLMOutputGuard.removedOnlyMarkers(input: unit, output: improved) else { throw LLMError.rejectedOutput }
                 // The corrected numbers must be in the result, otherwise the model kept the wrong version.
                 let outputNumbers = Set(improved.split(whereSeparator: { !$0.isNumber }).map(String.init))
                 guard CleanupGate.correctedNumbers(in: unit, language: language).allSatisfy(outputNumbers.contains) else {
@@ -238,7 +241,9 @@ public actor DictationSession {
             do {
                 let improved = try await llm.cleanup(text: combined, style: style, language: language)
                 Debug.log("llm (across pause): \(combined) -> \(improved)")
-                guard !LLMOutputGuard.sameWords(improved, units[index - 1]) else { throw LLMError.rejectedOutput }
+                guard !LLMOutputGuard.sameWords(improved, units[index - 1]),
+                      !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved)
+                else { throw LLMError.rejectedOutput }
                 units[index - 1] = RuleCleaner.clean(improved, language: language)
                 units.remove(at: index)
                 usedLLM = true

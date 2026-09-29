@@ -7,7 +7,7 @@ import Foundation
 public enum RuleCleaner {
 
     static let germanFillers = ["ähm", "äähm", "ähmm", "äh", "ääh", "öhm", "öh", "ehm", "hm", "hmm", "mhm", "hmhm"]
-    static let englishFillers = ["um", "umm", "uh", "uhh", "uhm", "erm", "er", "hmm", "hm", "mm", "mhm"]
+    static let englishFillers = ["um", "umm", "uh", "uhh", "uhm", "erm", "er", "hmm", "hm", "mhm"]
     /// All filler words, used by the change summary.
     static let fillerWords = germanFillers + englishFillers
 
@@ -17,6 +17,7 @@ public enum RuleCleaner {
 
     static let englishEmphasis: Set<String> = [
         "very", "really", "so", "no", "yes", "yeah", "bye", "thanks", "ha", "haha", "ok", "okay", "go", "well", "please",
+        "much", "many", "blah", "bla", "far", "hey", "knock", "chop", "more", "again", "over", "round", "on",
     ]
     static let englishDoubles: Set<String> = ["that", "had", "is"]
     static let englishDeterminers: Set<String> = [
@@ -57,6 +58,8 @@ public enum RuleCleaner {
     static func isNonTerminalPeriod(_ token: Substring) -> Bool {
         let lower = token.lowercased()
         if abbreviations.contains(lower) { return true }
+        // Letter-dot abbreviations: u.s., u.k., e.u., i.e.
+        if lower.range(of: #"^(?:\p{L}\.){2,}$"#, options: .regularExpression) != nil { return true }
         let body = lower.dropLast()
         return !body.isEmpty && body.allSatisfy(\.isNumber)
     }
@@ -96,12 +99,16 @@ public enum RuleCleaner {
             of: #",\s*(?i:"# + alternation + #")(?![\p{L}\p{N}-])\s*,\s*"#,
             with: " ", options: .regularExpression)
         // Filler as a standalone word, together with the comma/dot the recognizer attached to it.
+        // Only lower case or a capital first letter: "ER" (emergency room) and "UM" stay.
+        let casedAlternation = fillers(language).map { word in
+            "(?:" + NSRegularExpression.escapedPattern(for: word) + "|" + NSRegularExpression.escapedPattern(for: word.prefix(1).uppercased() + word.dropFirst()) + ")"
+        }.joined(separator: "|")
         result = result.replacingOccurrences(
-            of: #"(?<![\p{L}\p{N}-])(?i:"# + alternation + #")(?![\p{L}\p{N}-])[,.…]*"#,
+            of: #"(?<![\p{L}\p{N}-])(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,.…]*"#,
             with: "", options: .regularExpression)
         // "Em," / "Äm," at the very start of a dictation.
         result = result.replacingOccurrences(
-            of: #"^(?i:em|emm|äm|ämm|öm)[,.…]\s*"#, with: "", options: .regularExpression)
+            of: #"^(?i:em|emm|äm|ämm|öm|um|uh|uhm)[,.…]\s*"#, with: "", options: .regularExpression)
         if language == .german {
             // Lowercase-only spellings of "ähm" the recognizer produces ("EM" stays: Europameisterschaft).
             result = result.replacingOccurrences(
@@ -229,10 +236,10 @@ public enum RuleCleaner {
     /// them ("the question mark", "a new line") means they are content.
     static func applyEnglishCommands(_ text: String) -> String {
         var result = text
-        let determiner = #"(?<!\b(?i:the|a|an|this|that|my|your|no|one) )"#
+        let determiner = #"(?<!\b(?i:the|a|an|this|that|my|your|our|his|her|their|its|no|one|big|huge|small|another|every|each|any|some|same|first|last) )"#
         let punctuation: [(String, String)] = [
             (#"question mark"#, "?"), (#"exclamation (?:mark|point)"#, "!"), (#"semicolon"#, ";"),
-            (#"colon"#, ":"), (#"comma"#, ","), (#"full stop"#, "."),
+            (#"colon(?! (?:cancer|surgery|cleanse|polyps?|screening|health))"#, ":"), (#"comma"#, ","), (#"full stop"#, "."),
         ]
         for (phrase, symbol) in punctuation {
             result = result.replacingOccurrences(
@@ -241,7 +248,7 @@ public enum RuleCleaner {
         }
         let pairs: [(String, String)] = [
             (#"(?:open|begin) (?:quote|quotes|quotation marks?)"#, "\u{201C}"),
-            (#"(?:close|end) (?:quote|quotes|quotation marks?)|unquote"#, "\u{201D}"),
+            (#"(?:close|end) (?:quote|quotes|quotation marks?)|(?<!quote )unquote"#, "\u{201D}"),
             (#"open (?:paren|parenthesis|parentheses|bracket)"#, "("),
             (#"close (?:paren|parenthesis|parentheses|bracket)"#, ")"),
         ]
@@ -252,13 +259,17 @@ public enum RuleCleaner {
                 : #"[ \t]*[,.]?[ \t]*"# + determiner + #"\b(?i:"# + phrase + #")\b"#
             result = result.replacingOccurrences(of: pattern, with: symbol, options: .regularExpression)
         }
+        // "period" only as a command at the end or right before a line break ("a period of time" stays).
+        result = result.replacingOccurrences(
+            of: #"[ \t]*[,.]?[ \t]*\b(?i:period)\b[.]?(?=\s*$|\s+(?i:new|next) (?i:line|paragraph))"#,
+            with: ".", options: .regularExpression)
         for (phrase, replacement) in [(#"new paragraph"#, "\n\n"), (#"(?:new|next) line"#, "\n")] {
             result = result.replacingOccurrences(
                 of: #"[ \t]*"# + determiner + #"\b(?i:"# + phrase + #")\b[\s,.;]*"#,
                 with: replacement, options: .regularExpression)
         }
         // Lowercase "i" as a word is always "I".
-        result = result.replacingOccurrences(of: #"(?<![\p{L}'])i(?=(?:'[a-z]+)?(?![\p{L}]))"#, with: "I", options: .regularExpression)
+        result = result.replacingOccurrences(of: #"(?<![\p{L}'.])i(?!\.[a-z]\.)(?=(?:'[a-z]+)?(?![\p{L}]))"#, with: "I", options: .regularExpression)
         return result
     }
 
@@ -290,11 +301,23 @@ public enum RuleCleaner {
         // A line that ends in a word before a paragraph/line break gets a period, except greeting and
         // closing lines of letters ("Mit freundlichen Grüßen", "Hallo Anna").
         result = result.replacingOccurrences(
-            of: #"(?m)^(?!.*(?i:grüßen|grüße|gruß|grüsse|regards|hallo|hi|hey|hello|dear|cheers|best|sincerely|liebe[rs]?|sehr geehrte[rs]?|guten (?:tag|morgen|abend))[^\n]*$)([^\n]*[\p{L}\p{N}])(?=\n)"#,
+            of: #"(?m)^(?!.*\b(?i:grüßen|grüße|gruß|grüsse|regards|hallo|hi|hey|hello|dear|cheers|best|sincerely|thanks|liebe[rs]?|sehr geehrte[rs]?|guten (?:tag|morgen|abend))\b[^\n]*$)([^\n]*[\p{L}\p{N}])(?=\n)"#,
             with: "$1.", options: .regularExpression)
-        result = capitalizeSentences(result)
-        result = ensureTerminalPunctuation(result, style: style)
+        result = capitalizeSentences(result, capitalizeAfterCommaLine: language == .english)
+        if !isSignatureLine(result) {
+            result = ensureTerminalPunctuation(result, style: style)
+        }
         return result
+    }
+
+    /// The last line is a name under a closing ("Best regards,\nAlex"): no period after it.
+    static func isSignatureLine(_ text: String) -> Bool {
+        let lines = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard lines.count >= 2, let last = lines.last, let previous = lines.dropLast().last else { return false }
+        let closing = previous.range(
+            of: #"(?i)\b(?:regards|grüßen|grüße|gruß|cheers|best|thanks|sincerely|herzlich(?:st)?|viele grüße)\b[,!]?\s*$"#,
+            options: .regularExpression) != nil
+        return closing && last.split(separator: " ").count <= 3
     }
 
     /// Colloquial short forms and their written standard form, for the formal style.
@@ -308,9 +331,9 @@ public enum RuleCleaner {
     ]
 
     static let englishShortForms: [(String, String)] = [
-        ("gonna", "going to"), ("wanna", "want to"), ("gotta", "have to"), ("kinda", "kind of"), ("sorta", "sort of"),
-        ("dunno", "don't know"), ("lemme", "let me"), ("gimme", "give me"), ("'cause", "because"), ("cuz", "because"),
-        ("ain't", "isn't"), ("y'all", "you all"),
+        ("'ve gotta", "'ve got to"), ("gonna", "going to"), ("wanna", "want to"), ("gotta", "have to"),
+        ("kinda", "kind of"), ("sorta", "sort of"), ("dunno", "don't know"), ("lemme", "let me"), ("gimme", "give me"),
+        ("'cause", "because"), ("cuz", "because"), ("y'all", "you all"),
     ]
 
     static func expandShortForms(_ text: String, forms: [(String, String)]) -> String {
@@ -334,7 +357,7 @@ public enum RuleCleaner {
     /// Uppercases the first letter of each sentence. A sentence ends at `.?!` followed by whitespace
     /// (not inside URLs or e-mail addresses, not after abbreviations or ordinals) or at a line break
     /// that does not follow a comma ("Sehr geehrte Frau X,\nvielen Dank").
-    static func capitalizeSentences(_ text: String) -> String {
+    static func capitalizeSentences(_ text: String, capitalizeAfterCommaLine: Bool = false) -> String {
         let chars = Array(text)
         var output = ""
         var capitalizeNext = true
@@ -346,7 +369,8 @@ public enum RuleCleaner {
                 pendingEnd = false
                 if char == "\n" {
                     let previous = chars[..<index].last { !$0.isNewline }
-                    capitalizeNext = previous.map { $0 != "," } ?? true
+                    // German letters continue lowercase after "Sehr geehrte Frau X,"; English capitalizes.
+                    capitalizeNext = capitalizeAfterCommaLine || (previous.map { $0 != "," } ?? true)
                 }
                 output.append(char)
                 tokenStart = index + 1
@@ -382,7 +406,7 @@ public enum RuleCleaner {
         }
         if style == .casual, result.hasSuffix("."), !result.hasSuffix("..") {
             let body = result.dropLast()
-            let isSingleSentence = !body.contains(where: { ".?!\n".contains($0) })
+            let isSingleSentence = !body.contains("\n") && SentenceSplitter.split(String(body)).count == 1
             if isSingleSentence { result = String(body) }
         }
         return result

@@ -213,7 +213,7 @@
   "segs": [
    "Dear team comma new line thanks for your help."
   ],
-  "expected": "Dear team,\nthanks for your help."
+  "expected": "Dear team,\nThanks for your help."
  },
  {
   "id": "k4",
@@ -367,5 +367,681 @@
    "I dunno if that works."
   ],
   "expected": "I don't know if that works."
+ },
+ {
+  "id": "r3-l1",
+  "style": "casual",
+  "segs": [
+   "Um, sounds good."
+  ],
+  "expected": "Sounds good"
+ },
+ {
+  "id": "r3-l2",
+  "style": "casual",
+  "segs": [
+   "Sounds good exclamation mark"
+  ],
+  "expected": "Sounds good!"
+ },
+ {
+  "id": "r3-l3",
+  "style": "neutral",
+  "segs": [
+   "Got it, thanks."
+  ],
+  "expected": "Got it, thanks."
+ },
+ {
+  "id": "r3-l4",
+  "style": "neutral",
+  "segs": [
+   "Noted."
+  ],
+  "expected": "Noted."
+ },
+ {
+  "id": "r3-l5",
+  "style": "casual",
+  "segs": [
+   "Really question mark"
+  ],
+  "expected": "Really?"
+ },
+ {
+  "id": "r3-l6",
+  "style": "casual",
+  "segs": [
+   "Uh, cheers mate."
+  ],
+  "expected": "Cheers mate"
+ },
+ {
+  "id": "r3-l7",
+  "style": "neutral",
+  "segs": [
+   "On my way."
+  ],
+  "expected": "On my way."
+ },
+ {
+  "id": "r3-l8",
+  "style": "neutral",
+  "segs": [
+   "Um, can you ask Herr Müller about die Rechnung für den Drucker?"
+  ],
+  "expected": "Can you ask Herr Müller about die Rechnung für den Drucker?"
+ },
+ {
+  "id": "r3-l9",
+  "style": "casual",
+  "segs": [
+   "Uh, okay."
+  ],
+  "expected": "Okay"
+ },
+ {
+  "id": "r3-l10",
+  "style": "neutral",
+  "segs": [
+   "Gut feeling, honestly."
+  ],
+  "expected": "Gut feeling, honestly."
+ },
+ {
+  "id": "r3-l11",
+  "style": "neutral",
+  "segs": [
+   "Please forward this to Frau Schäfer in the Buchhaltung."
+  ],
+  "expected": "Please forward this to Frau Schäfer in the Buchhaltung."
+ },
+ {
+  "id": "r3-m1",
+  "style": "casual",
+  "segs": [
+   "Running late, be there in like 15 minutes."
+  ],
+  "expected": "Running late, be there in like 15 minutes"
+ },
+ {
+  "id": "r3-m2",
+  "style": "casual",
+  "segs": [
+   "It was like really good, you should try it."
+  ],
+  "expected": "It was like really good, you should try it"
+ },
+ {
+  "id": "r3-m3",
+  "style": "neutral",
+  "segs": [
+   "Can you explain to me how compound interest works?"
+  ],
+  "expected": "Can you explain to me how compound interest works?"
+ },
+ {
+  "id": "r3-m4",
+  "style": "neutral",
+  "segs": [
+   "Explain the difference between a virus and a bacterium."
+  ],
+  "expected": "Explain the difference between a virus and a bacterium."
+ },
+ {
+  "id": "r3-m5",
+  "style": "neutral",
+  "segs": [
+   "No, we haven't received the payment yet."
+  ],
+  "expected": "No, we haven't received the payment yet."
+ },
+ {
+  "id": "r3-m6",
+  "style": "neutral",
+  "segs": [
+   "Actually, I really liked the second draft."
+  ],
+  "expected": "Actually, I really liked the second draft."
+ },
+ {
+  "id": "r3-m7",
+  "style": "neutral",
+  "segs": [
+   "I checked the numbers. Actually, in March we sold more than expected."
+  ],
+  "expected": "I checked the numbers. Actually, in March we sold more than expected."
+ },
+ {
+  "id": "r3-m8",
+  "style": "neutral",
+  "segs": [
+   "Thanks for the invite. Sorry, at the moment I'm completely swamped."
+  ],
+  "expected": "Thanks for the invite. Sorry, at the moment I'm completely swamped."
+ },
+ {
+  "id": "r3-m9",
+  "style": "neutral",
+  "segs": [
+   "I sent out all the invitations. No one replied so far."
+  ],
+  "expected": "I sent out all the invitations. No one replied so far."
+ },
+ {
+  "id": "r3-m10",
+  "style": "neutral",
+  "segs": [
+   "It's fine, I mean, we can always try again next week."
+  ],
+  "expected": "It's fine, I mean, we can always try again next week."
+ },
+ {
+  "id": "r3-m11",
+  "style": "neutral",
+  "segs": [
+   "The new feature is great. I mean, seriously, who designed this?"
+  ],
+  "expected": "The new feature is great. I mean, seriously, who designed this?"
+ },
+ {
+  "id": "r3-m12",
+  "style": "neutral",
+  "segs": [
+   "Can you scratch that item off the shopping list?"
+  ],
+  "expected": "Can you scratch that item off the shopping list?"
+ },
+ {
+  "id": "r3-m13",
+  "style": "casual",
+  "segs": [
+   "Never mind, it works now."
+  ],
+  "expected": "Never mind, it works now"
+ },
+ {
+  "id": "r3-m14",
+  "style": "neutral",
+  "segs": [
+   "If they say no, just forget it."
+  ],
+  "expected": "If they say no, just forget it."
+ },
+ {
+  "id": "r3-m15",
+  "style": "neutral",
+  "segs": [
+   "It works, actually, for most of our users."
+  ],
+  "expected": "It works, actually, for most of our users."
+ },
+ {
+  "id": "r3-m16",
+  "style": "neutral",
+  "segs": [
+   "Wait until the build is finished before you deploy."
+  ],
+  "expected": "Wait until the build is finished before you deploy."
+ },
+ {
+  "id": "r3-m17",
+  "style": "neutral",
+  "segs": [
+   "Never mind the typos, just send it."
+  ],
+  "expected": "Never mind the typos, just send it."
+ },
+ {
+  "id": "r3-m18",
+  "style": "neutral",
+  "segs": [
+   "Yes, no, maybe, I honestly don't know yet."
+  ],
+  "expected": "Yes, no, maybe, I honestly don't know yet."
+ },
+ {
+  "id": "r3-m19",
+  "style": "neutral",
+  "segs": [
+   "Thanks for asking. No, on Friday I'm out of office."
+  ],
+  "expected": "Thanks for asking. No, on Friday I'm out of office."
+ },
+ {
+  "id": "r3-m20",
+  "style": "neutral",
+  "segs": [
+   "The trial period ends on Friday."
+  ],
+  "expected": "The trial period ends on Friday."
+ },
+ {
+  "id": "r3-m21",
+  "style": "neutral",
+  "segs": [
+   "There's still a big question mark over the budget."
+  ],
+  "expected": "There's still a big question mark over the budget."
+ },
+ {
+  "id": "r3-m22",
+  "style": "neutral",
+  "segs": [
+   "We are launching our new line of running shoes next month."
+  ],
+  "expected": "We are launching our new line of running shoes next month."
+ },
+ {
+  "id": "r3-m23",
+  "style": "neutral",
+  "segs": [
+   "My uncle had colon cancer surgery last year."
+  ],
+  "expected": "My uncle had colon cancer surgery last year."
+ },
+ {
+  "id": "r3-m24",
+  "style": "neutral",
+  "segs": [
+   "She's in the ER right now."
+  ],
+  "expected": "She's in the ER right now."
+ },
+ {
+  "id": "r3-m25",
+  "style": "neutral",
+  "segs": [
+   "I shot the whole thing on 35 mm film."
+  ],
+  "expected": "I shot the whole thing on 35 mm film."
+ },
+ {
+  "id": "r3-m26",
+  "style": "neutral",
+  "segs": [
+   "Uh-oh, the build failed again."
+  ],
+  "expected": "Uh-oh, the build failed again."
+ },
+ {
+  "id": "r3-m27",
+  "style": "neutral",
+  "segs": [
+   "It's much much better now."
+  ],
+  "expected": "It's much much better now."
+ },
+ {
+  "id": "r3-m28",
+  "style": "neutral",
+  "segs": [
+   "He's a quote unquote expert on this."
+  ],
+  "expected": "He's a quote unquote expert on this."
+ },
+ {
+  "id": "r3-f1",
+  "style": "neutral",
+  "segs": [
+   "Um, so I was, uh, wondering if you're free on Saturday."
+  ],
+  "expected": "So I was wondering if you're free on Saturday."
+ },
+ {
+  "id": "r3-f2",
+  "style": "neutral",
+  "segs": [
+   "We we need to talk about the the budget."
+  ],
+  "expected": "We need to talk about the budget."
+ },
+ {
+  "id": "r3-f3",
+  "style": "neutral",
+  "segs": [
+   "Er, I think we should, um, postpone the launch."
+  ],
+  "expected": "I think we should postpone the launch."
+ },
+ {
+  "id": "r3-f4",
+  "style": "casual",
+  "segs": [
+   "Hmm, I'm not sure, uh, maybe tomorrow?"
+  ],
+  "expected": "I'm not sure, maybe tomorrow?"
+ },
+ {
+  "id": "r3-f5",
+  "style": "casual",
+  "segs": [
+   "And then blah blah blah, you know how it goes."
+  ],
+  "expected": "And then blah blah blah, you know how it goes"
+ },
+ {
+  "id": "r3-f6",
+  "style": "neutral",
+  "segs": [
+   "Can you can you send me the link?"
+  ],
+  "expected": "Can you send me the link?"
+ },
+ {
+  "id": "r3-n1",
+  "style": "neutral",
+  "segs": [
+   "The total comes to $1,249.99 including tax."
+  ],
+  "expected": "The total comes to $1,249.99 including tax."
+ },
+ {
+  "id": "r3-n2",
+  "style": "neutral",
+  "segs": [
+   "We need a fix, i.e. a patch before Monday."
+  ],
+  "expected": "We need a fix, i.e. a patch before Monday."
+ },
+ {
+  "id": "r3-n3",
+  "style": "neutral",
+  "segs": [
+   "The U.S. market is growing faster than Europe."
+  ],
+  "expected": "The U.S. market is growing faster than Europe."
+ },
+ {
+  "id": "r3-n4",
+  "style": "casual",
+  "segs": [
+   "Mr. Smith called again."
+  ],
+  "expected": "Mr. Smith called again"
+ },
+ {
+  "id": "r3-n5",
+  "style": "casual",
+  "segs": [
+   "Coffee is $3.50 now, crazy."
+  ],
+  "expected": "Coffee is $3.50 now, crazy"
+ },
+ {
+  "id": "r3-n6",
+  "style": "neutral",
+  "segs": [
+   "Dr. Patel will see you at 9:15 a.m. on March 3rd."
+  ],
+  "expected": "Dr. Patel will see you at 9:15 a.m. on March 3rd."
+ },
+ {
+  "id": "r3-n7",
+  "style": "neutral",
+  "segs": [
+   "The docs are at github.com/saywrite/docs, check section 4.2."
+  ],
+  "expected": "The docs are at github.com/saywrite/docs, check section 4.2."
+ },
+ {
+  "id": "r3-n8",
+  "style": "neutral",
+  "segs": [
+   "Bring snacks, drinks, etc. We start at 8 p.m."
+  ],
+  "expected": "Bring snacks, drinks, etc. We start at 8 p.m."
+ },
+ {
+  "id": "r3-n9",
+  "style": "neutral",
+  "segs": [
+   "Revenue grew by 12.5% compared to Q3."
+  ],
+  "expected": "Revenue grew by 12.5% compared to Q3."
+ },
+ {
+  "id": "r3-k1",
+  "style": "formal",
+  "segs": [
+   "Hi John comma new line thanks for the quick reply."
+  ],
+  "expected": "Hi John,\nThanks for the quick reply."
+ },
+ {
+  "id": "r3-k2",
+  "style": "formal",
+  "segs": [
+   "Hi Sarah comma new line I wanted to follow up on the invoice from last week.",
+   "New paragraph best regards comma new line Alex"
+  ],
+  "expected": "Hi Sarah,\nI wanted to follow up on the invoice from last week.\n\nBest regards,\nUrs"
+ },
+ {
+  "id": "r3-k3",
+  "style": "neutral",
+  "segs": [
+   "Agenda colon budget comma hiring comma roadmap."
+  ],
+  "expected": "Agenda: budget, hiring, roadmap."
+ },
+ {
+  "id": "r3-k4",
+  "style": "neutral",
+  "segs": [
+   "I think this works new line they agreed as well."
+  ],
+  "expected": "I think this works.\nThey agreed as well."
+ },
+ {
+  "id": "r3-k5",
+  "style": "neutral",
+  "segs": [
+   "Thanks for your help period"
+  ],
+  "expected": "Thanks for your help."
+ },
+ {
+  "id": "r3-k6",
+  "style": "neutral",
+  "segs": [
+   "The deadline open paren see attached close paren is next Friday."
+  ],
+  "expected": "The deadline (see attached) is next Friday."
+ },
+ {
+  "id": "r3-k7",
+  "style": "neutral",
+  "segs": [
+   "She told me open quote I'll handle it close quote yesterday."
+  ],
+  "expected": "She told me “I'll handle it” yesterday."
+ },
+ {
+  "id": "r3-k8",
+  "style": "casual",
+  "segs": [
+   "Are you coming tonight question mark"
+  ],
+  "expected": "Are you coming tonight?"
+ },
+ {
+  "id": "r3-k9",
+  "style": "neutral",
+  "segs": [
+   "We won exclamation point new paragraph more details tomorrow."
+  ],
+  "expected": "We won!\n\nMore details tomorrow."
+ },
+ {
+  "id": "r3-s1",
+  "style": "formal",
+  "segs": [
+   "I've gotta leave early today."
+  ],
+  "expected": "I've got to leave early today."
+ },
+ {
+  "id": "r3-s2",
+  "style": "formal",
+  "segs": [
+   "I ain't sure that works."
+  ],
+  "expected": "I'm not sure that works."
+ },
+ {
+  "id": "r3-s3",
+  "style": "formal",
+  "segs": [
+   "Do you wanna join the call, 'cause we need your input?"
+  ],
+  "expected": "Do you want to join the call, because we need your input?"
+ },
+ {
+  "id": "r3-c1",
+  "style": "neutral",
+  "segs": [
+   "Let's meet at 4, no, at 5, no, at 6."
+  ],
+  "expected": "Let's meet at 6."
+ },
+ {
+  "id": "r3-c2",
+  "style": "neutral",
+  "segs": [
+   "The total is 40 dollars, sorry, 45 dollars."
+  ],
+  "expected": "The total is 45 dollars."
+ },
+ {
+  "id": "r3-c3",
+  "style": "neutral",
+  "segs": [
+   "Send it to Mark, sorry, Mike."
+  ],
+  "expected": "Send it to Mike."
+ },
+ {
+  "id": "r3-c4",
+  "style": "neutral",
+  "segs": [
+   "The wall is blue, or rather green."
+  ],
+  "expected": "The wall is green."
+ },
+ {
+  "id": "r3-c5",
+  "style": "neutral",
+  "segs": [
+   "Invite Sarah, actually, invite Mike instead."
+  ],
+  "expected": "Invite Mike instead."
+ },
+ {
+  "id": "r3-c6",
+  "style": "neutral",
+  "segs": [
+   "The deadline is Friday, no, it's Thursday."
+  ],
+  "expected": "The deadline is Thursday.||It's Thursday."
+ },
+ {
+  "id": "r3-c7",
+  "style": "casual",
+  "segs": [
+   "Two coffees, make that three."
+  ],
+  "expected": "Three coffees"
+ },
+ {
+  "id": "r3-c8",
+  "style": "neutral",
+  "segs": [
+   "The package arrives on Thursday,",
+   "+no, on Friday."
+  ],
+  "expected": "The package arrives on Friday."
+ },
+ {
+  "id": "r3-c9",
+  "style": "neutral",
+  "segs": [
+   "Meet me at the north entrance.",
+   "Sorry, at the south entrance."
+  ],
+  "expected": "Meet me at the south entrance."
+ },
+ {
+  "id": "r3-c10",
+  "style": "neutral",
+  "segs": [
+   "Buy eggs and milk. Scratch that, just eggs."
+  ],
+  "expected": "Just eggs.||Buy eggs.||Buy just eggs."
+ },
+ {
+  "id": "r3-c11",
+  "style": "neutral",
+  "segs": [
+   "Can you send me the file? Never mind, I found it."
+  ],
+  "expected": "I found it."
+ },
+ {
+  "id": "r3-c12",
+  "style": "formal",
+  "segs": [
+   "Please book the room for Tuesday, I mean Wednesday, at 10 a.m."
+  ],
+  "expected": "Please book the room for Wednesday at 10 a.m."
+ },
+ {
+  "id": "r3-c13",
+  "style": "neutral",
+  "segs": [
+   "The flight lands in Frankfurt, wait, in Munich at 7."
+  ],
+  "expected": "The flight lands in Munich at 7."
+ },
+ {
+  "id": "r3-c14",
+  "style": "casual",
+  "segs": [
+   "I'll call Tom, no, I'll text him."
+  ],
+  "expected": "I'll text him"
+ },
+ {
+  "id": "r3-c15",
+  "style": "neutral",
+  "segs": [
+   "It's on the 3rd, no wait, the 4th."
+  ],
+  "expected": "It's on the 4th."
+ },
+ {
+  "id": "r3-c16",
+  "style": "neutral",
+  "segs": [
+   "Let's do 3 PM, actually 3:30 PM."
+  ],
+  "expected": "Let's do 3:30 PM."
+ },
+ {
+  "id": "r3-c17",
+  "style": "neutral",
+  "segs": [
+   "Tell Anna, I mean Lisa, that the report is done."
+  ],
+  "expected": "Tell Lisa that the report is done."
+ },
+ {
+  "id": "r3-c18",
+  "style": "neutral",
+  "segs": [
+   "We should hire two engineers.",
+   "Actually, no, three engineers."
+  ],
+  "expected": "We should hire three engineers."
  }
 ]
