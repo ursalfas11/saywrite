@@ -106,7 +106,7 @@ flowchart LR
 **Requirements:** macOS 14+ on Apple Silicon, Xcode 16+ to build.
 
 ```bash
-git clone https://github.com/ursalfas/saywrite.git
+git clone https://github.com/ursalfas11/saywrite.git
 cd saywrite
 make install                    # builds and copies Saywrite.app to /Applications
 open /Applications/Saywrite.app
