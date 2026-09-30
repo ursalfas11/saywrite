@@ -1,4 +1,5 @@
 import AppKit
+import SaywriteCore
 import ApplicationServices
 import AVFoundation
 import Carbon
@@ -68,9 +69,7 @@ enum TextInserter {
             AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &settable)
             // A web area only counts when it is editable (Mail compose, a focused input); a page or a
             // received mail in Safari/Mail is not a text field, and ⌘Z there could reopen a tab.
-            var editable: CFTypeRef?
-            AXUIElementCopyAttributeValue(element, "AXEditable" as CFString, &editable)
-            let isEditableWebArea = (role as? String) == "AXWebArea" && (settable.boolValue || (editable as? Bool) == true)
+            let isEditableWebArea = (role as? String) == "AXWebArea" && (settable.boolValue || isEditableDocument(element))
             if textRoles.contains(role as? String ?? "") || settable.boolValue || isEditableWebArea {
                 return terminals.contains(bundleID) ? .blind : .textField
             }
@@ -81,6 +80,18 @@ enum TextInserter {
             return .blind
         }
         return .none
+    }
+
+    /// WebKit marks an editable document (Mail compose, rich-text editors in an iframe) with an
+    /// editable ancestor or a settable value; a plain page has neither.
+    private static func isEditableDocument(_ element: AXUIElement) -> Bool {
+        for attribute in ["AXEditableAncestor", "AXHighestEditableAncestor"] {
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success, value != nil { return true }
+        }
+        var valueSettable: DarwinBoolean = false
+        AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &valueSettable)
+        return valueSettable.boolValue
     }
 
     private static func isElectron(_ app: NSRunningApplication) -> Bool {
@@ -94,6 +105,7 @@ enum TextInserter {
         // Electron apps (Slack, VS Code, Discord) often expose no focused element but accept ⌘V,
         // so only a missing frontmost app means "nowhere to paste".
         let target = pasteTarget()
+        Debug.log("paste target \(target) in \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-")")
         lastPasteSupportsUndo = target == .textField
         guard target != .none else {
             pasteboard.clearContents()
