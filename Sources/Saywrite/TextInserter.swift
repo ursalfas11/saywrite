@@ -50,7 +50,12 @@ enum TextInserter {
     ]
 
     private static let textRoles: Set<String> = [
-        kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXWebArea", "AXSearchField",
+        kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXSearchField",
+    ]
+
+    /// Native apps with little accessibility support that still accept ⌘V.
+    private static let blindPasteEditors: Set<String> = [
+        "dev.zed.Zed", "com.sublimetext.4", "com.sublimetext.3", "com.jetbrains.intellij", "com.jetbrains.pycharm",
     ]
 
     private static func pasteTarget() -> PasteTarget {
@@ -61,12 +66,20 @@ enum TextInserter {
             AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
             var settable: DarwinBoolean = false
             AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &settable)
-            if textRoles.contains(role as? String ?? "") || settable.boolValue {
+            // A web area only counts when it is editable (Mail compose, a focused input); a page or a
+            // received mail in Safari/Mail is not a text field, and ⌘Z there could reopen a tab.
+            var editable: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, "AXEditable" as CFString, &editable)
+            let isEditableWebArea = (role as? String) == "AXWebArea" && (settable.boolValue || (editable as? Bool) == true)
+            if textRoles.contains(role as? String ?? "") || settable.boolValue || isEditableWebArea {
                 return terminals.contains(bundleID) ? .blind : .textField
             }
         }
         // Finder, the desktop, Preview: ⌘V would do nothing (or paste a file), so copy instead.
-        if blindPasteApps.contains(bundleID) || isElectron(app) { return .blind }
+        if blindPasteApps.contains(bundleID) || blindPasteEditors.contains(bundleID) || terminals.contains(bundleID)
+            || isElectron(app) {
+            return .blind
+        }
         return .none
     }
 
@@ -133,7 +146,8 @@ enum TextInserter {
         let pasteboard = NSPasteboard.general
         // During a pending paste restore the clipboard holds our own text; keep the real original.
         let pendingOriginal = userClipboard
-        let saved: [SavedItem]? = pendingOriginal.flatMap { $0 } ?? savePasteboard()
+        // .some(nil): the original could not be saved (too large); never restore our own text then.
+        let saved: [SavedItem]? = pendingOriginal != nil ? pendingOriginal! : savePasteboard()
         pasteGeneration += 1
         userClipboard = nil
         let before = pasteboard.changeCount
@@ -146,8 +160,10 @@ enum TextInserter {
                 break
             }
         }
-        // Only touch the clipboard again if the copy actually happened.
-        if pasteboard.changeCount != before, let saved { restorePasteboard(saved) }
+        // Restore when the copy happened, and always when we took over a pending paste restore
+        // (its restore was cancelled above, so the user's original must come back now).
+        let tookOverPending = pendingOriginal != nil
+        if pasteboard.changeCount != before || tookOverPending, let saved { restorePasteboard(saved) }
         guard let text, !text.isEmpty else { return nil }
         return text
     }

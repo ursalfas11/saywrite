@@ -82,8 +82,11 @@ final class DictationController {
             guard let self, case .recording(let action) = self.phase else { return }
             self.hotkeys.reset()
             self.requestFinish(action) // keep what was said so far
+            let id = self.sessionID
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
+                // Not over a new recording or the next dictation's panel.
+                guard self.sessionID == id, case .idle = self.phase else { return }
                 self.showError(L("Microphone disconnected", "Mikrofon getrennt"), action: nil)
             }
         }
