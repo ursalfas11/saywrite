@@ -28,18 +28,70 @@ enum TextInserter {
     /// insert in that window must not save our temporary text as "the user's clipboard".
     private static var userClipboard: [SavedItem]??
     private static var pasteGeneration = 0
+    private static var lastWrittenChangeCount = -1
+
+    /// Whether ⌘Z in the target of the last paste reliably undoes exactly that paste.
+    private(set) static var lastPasteSupportsUndo = false
+
+    private enum PasteTarget { case textField, blind, none }
+
+    /// Apps whose windows expose no accessibility text field but accept ⌘V (Electron, Chromium).
+    private static let blindPasteApps: Set<String> = [
+        "com.tinyspeck.slackmacgap", "com.hnc.Discord", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
+        "com.google.Chrome", "com.brave.Browser", "com.microsoft.edgemac", "company.thebrowser.Browser",
+        "com.vivaldi.Vivaldi", "notion.id", "com.spotify.client", "md.obsidian", "com.figma.Desktop",
+        "net.whatsapp.WhatsApp", "desktop.WhatsApp", "org.whispersystems.signal-desktop", "com.linear",
+    ]
+
+    /// Terminals: ⌘Z does not undo a paste there, so "Original" is not offered.
+    private static let terminals: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "com.mitchellh.ghostty",
+        "net.kovidgoyal.kitty", "io.alacritty",
+    ]
+
+    private static let textRoles: Set<String> = [
+        kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXWebArea", "AXSearchField",
+    ]
+
+    private static func pasteTarget() -> PasteTarget {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return .none }
+        let bundleID = app.bundleIdentifier ?? ""
+        if let element = focusedElement() {
+            var role: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+            var settable: DarwinBoolean = false
+            AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &settable)
+            if textRoles.contains(role as? String ?? "") || settable.boolValue {
+                return terminals.contains(bundleID) ? .blind : .textField
+            }
+        }
+        // Finder, the desktop, Preview: ⌘V would do nothing (or paste a file), so copy instead.
+        if blindPasteApps.contains(bundleID) || isElectron(app) { return .blind }
+        return .none
+    }
+
+    private static func isElectron(_ app: NSRunningApplication) -> Bool {
+        guard let url = app.bundleURL else { return false }
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path)
+    }
 
     static func insert(_ text: String, onPasted: (() -> Void)? = nil) async -> InsertOutcome {
         let pasteboard = NSPasteboard.general
         if isSecureInputActive() { return .secureField }
         // Electron apps (Slack, VS Code, Discord) often expose no focused element but accept ⌘V,
         // so only a missing frontmost app means "nowhere to paste".
-        guard NSWorkspace.shared.frontmostApplication != nil else {
+        let target = pasteTarget()
+        lastPasteSupportsUndo = target == .textField
+        guard target != .none else {
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
             return .copiedToClipboard
         }
-        if userClipboard == nil { userClipboard = .some(savePasteboard()) }
+        // Save the user's clipboard, unless one of our own pastes is still pending (then its saved
+        // copy is the real one). If the user copied something meanwhile, that is the new original.
+        if userClipboard == nil || pasteboard.changeCount != lastWrittenChangeCount {
+            userClipboard = .some(savePasteboard())
+        }
         pasteGeneration += 1
         let generation = pasteGeneration
         pasteboard.clearContents()
@@ -48,6 +100,7 @@ enum TextInserter {
         for type in transientTypes { item.setString("", forType: type) }
         pasteboard.writeObjects([item])
         let changeCount = pasteboard.changeCount
+        lastWrittenChangeCount = changeCount
         postCommand(key: CGKeyCode(kVK_ANSI_V))
         onPasted?()
         // Slow apps (Electron) read the clipboard late; restore only after they had time.
@@ -78,7 +131,11 @@ enum TextInserter {
             }
         }
         let pasteboard = NSPasteboard.general
-        let saved = savePasteboard()
+        // During a pending paste restore the clipboard holds our own text; keep the real original.
+        let pendingOriginal = userClipboard
+        let saved: [SavedItem]? = pendingOriginal.flatMap { $0 } ?? savePasteboard()
+        pasteGeneration += 1
+        userClipboard = nil
         let before = pasteboard.changeCount
         postCommand(key: CGKeyCode(kVK_ANSI_C))
         var text: String?

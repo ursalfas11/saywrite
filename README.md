@@ -72,8 +72,8 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 
 | Test set | Cases | Exactly right |
 |---|---|---|
-| English | 130 | 90 % |
-| German | 107 | 90 % |
+| English | 130 | ~90 % |
+| German | 107 | ~90 % |
 
 The sets cover everyday messages, e-mails, self-corrections of many shapes, sentences that must not change, numbers, dates, URLs, math, spoken commands and all three styles.
 
@@ -94,12 +94,12 @@ flowchart LR
     J --> D[Dictionary] --> I[Paste once]
 ```
 
-1. **Tapping the key** starts recording and primes the language model in the background, so there is no cold start later.
+1. **Tapping the key** starts recording, and as soon as it is clear you are dictating (not typing a ⌥ shortcut), the language model is primed in the background, so there is no cold start later.
 2. **A voice-activity detector** (Silero) cuts your speech at natural pauses. **Parakeet Ultra** transcribes each piece on the Neural Engine right away, while you keep talking.
 3. **The language is detected** from the recognized words (English or German), and **deterministic rules** for that language clean every piece instantly.
 4. **A gate** decides per sentence whether the model is needed at all. Most sentences never reach it.
 5. **An output guard** checks what the model returns: mostly your own words, a plausible length, and the corrected values still present. Anything else is thrown away.
-6. **The text is joined and pasted once**, so your cursor doesn't jump around, and your clipboard is restored afterwards.
+6. **The text is joined and pasted once**, so your cursor doesn't jump around, and your clipboard is restored afterwards (except for very large or lazily provided clipboard contents). Without a text field in front, the text is copied instead.
 
 ## Install
 
@@ -128,7 +128,7 @@ On first launch Saywrite asks for **Microphone** and **Accessibility** access. A
 | Dictate | Tap **right ⌥**, speak, tap again (or hold and release) |
 | Stop | Tap again, or click the red button in the panel |
 | Cancel | **Esc** |
-| Undo the AI | Click **↩ Original** right after inserting |
+| Undo the AI | Click **↩ Original** right after inserting (offered in text fields where undo is reliable) |
 | Rewrite a selection | Select text, tap **right ⌘**, speak the instruction, tap again |
 | Paste the last dictation | Menu bar icon → *Paste last dictation* |
 

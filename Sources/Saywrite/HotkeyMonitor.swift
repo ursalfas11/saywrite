@@ -108,6 +108,12 @@ final class HotkeyMonitor {
         if !stillDown { keyUp(active) }
     }
 
+    /// Events are delivered after the tap callback returned: with a filtering tap every key press
+    /// waits for the callback, so starting the microphone there would make typing lag.
+    private func emit(_ event: HotkeyEvent) {
+        DispatchQueue.main.async { [weak self] in self?.onEvent?(event) }
+    }
+
     /// Called by the controller when a session ended by other means (error, cancel via menu).
     func reset() {
         active = nil
@@ -132,13 +138,13 @@ final class HotkeyMonitor {
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         if event.keyCode == 53 /* Escape */ {
-            if let active {
+            if let active, !interrupted {
                 handsFree = false
                 interrupted = true
                 self.active = nil
                 pressTime = nil
                 confirmTimer?.invalidate()
-                onEvent?(.cancel(active))
+                emit(.cancel(active))
                 return true
             }
         }
@@ -147,7 +153,7 @@ final class HotkeyMonitor {
             Debug.log("cancel: key \(event.keyCode) pressed while holding")
             interrupted = true
             confirmTimer?.invalidate()
-            onEvent?(.cancel(active))
+            emit(.cancel(active))
         }
         return false
     }
@@ -164,7 +170,7 @@ final class HotkeyMonitor {
                 Debug.log("cancel: modifier \(event.keyCode) flags \(event.modifierFlags.rawValue) while holding")
                 interrupted = true
                 confirmTimer?.invalidate()
-                onEvent?(.cancel(active))
+                emit(.cancel(active))
             }
             return
         }
@@ -199,12 +205,12 @@ final class HotkeyMonitor {
         active = action
         pressTime = Date()
         interrupted = false
-        onEvent?(.begin(action))
+        emit(.begin(action))
         confirmTimer?.invalidate()
         confirmTimer = Timer.scheduledTimer(withTimeInterval: minimumHold, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let active = self.active, self.pressTime != nil, !self.interrupted else { return }
-                self.onEvent?(.confirmed(active))
+                self.emit(.confirmed(active))
             }
         }
     }
@@ -218,7 +224,7 @@ final class HotkeyMonitor {
         if handsFree {
             handsFree = false
             active = nil
-            onEvent?(.end(action))
+            emit(.end(action))
             return
         }
         if interrupted {
@@ -227,11 +233,11 @@ final class HotkeyMonitor {
         }
         if held >= minimumHold {
             active = nil
-            onEvent?(.end(action))
+            emit(.end(action))
             return
         }
         // Short tap: the recording that started on key down simply continues hands-free.
         handsFree = true
-        onEvent?(.handsFree(action))
+        emit(.handsFree(action))
     }
 }

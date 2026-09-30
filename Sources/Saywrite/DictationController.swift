@@ -41,6 +41,7 @@ final class DictationController {
     private let sounds = Sounds()
     private var startSoundPlayed = false
     private var pendingStartSound = false
+    private var panelShown = false
     private var audioFlowing = false
     private var peakLevel: Float = 0
 
@@ -81,7 +82,10 @@ final class DictationController {
             guard let self, case .recording(let action) = self.phase else { return }
             self.hotkeys.reset()
             self.requestFinish(action) // keep what was said so far
-            self.showError(L("Microphone disconnected", "Mikrofon getrennt"), action: nil)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                self.showError(L("Microphone disconnected", "Mikrofon getrennt"), action: nil)
+            }
         }
         overlay.onErrorClick = { [weak self] in
             self?.errorAction?()
@@ -220,7 +224,6 @@ final class DictationController {
             return
         }
 
-        undoCandidate = nil
         sessionID = UUID()
         sessionApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let style = settings.styleMap.style(for: sessionApp)
@@ -267,12 +270,17 @@ final class DictationController {
 
         // Right ⌥ is also used for @, € and brackets: the panel and sound only appear once it is
         // clearly a dictation (tap for hands-free, or held past the shortcut window).
-        overlay.model.reset()
-        overlay.model.isRewrite = action == .rewrite
         startPreview(session: session, segmenter: segmenter, id: sessionID)
     }
 
     private func showRecordingOverlay(_ action: HotkeyAction, handsFree: Bool) {
+        if !panelShown {
+            // Only now it is certain this is a dictation, not a ⌥ shortcut: replace the last panel.
+            panelShown = true
+            undoCandidate = nil
+            overlay.model.reset()
+            overlay.model.isRewrite = action == .rewrite
+        }
         overlay.show(.recording(handsFree: handsFree, rewrite: action == .rewrite))
         // The sound comes together with the panel, once per recording, and only with live audio.
         if audioFlowing { playStartSound() } else { pendingStartSound = true }
@@ -343,8 +351,10 @@ final class DictationController {
         chunkConsumer?.cancel()
         selectionTask?.cancel()
         if let session { Task { await session.cancel() } }
+        let wasShown = panelShown
         teardown()
-        overlay.show(.hidden)
+        // A cancelled ⌥ shortcut must not close the panel of the previous dictation.
+        if wasShown { overlay.show(.hidden) }
     }
 
     private func finish(_ action: HotkeyAction) async {
@@ -373,6 +383,7 @@ final class DictationController {
         phase = .idle
         prepared = false
         startSoundPlayed = false
+        panelShown = false
     }
 
     private func finishDictation(id: UUID) async {
@@ -400,7 +411,9 @@ final class DictationController {
             // Sound and panel react the moment the text lands, not after the clipboard restore.
             guard let self else { return }
             if self.settings.playSounds { self.sounds.playStop() }
-            self.overlay.show(.done(result.summary.text, undo: hasOriginal))
+            let undo = hasOriginal && TextInserter.lastPasteSupportsUndo
+            if !undo { self.undoCandidate = nil }
+            self.overlay.show(.done(result.summary.text, undo: undo))
             self.readyForNext(id)
         })
         history.append(result)
@@ -439,6 +452,7 @@ final class DictationController {
     }
 
     private func finishRewrite(samples: [Float], id: UUID) async {
+        let app = sessionApp
         let selection = await selectionTask?.value
         guard let selection else {
             showError(L("No text selected", "Kein Text markiert"), action: nil)
@@ -468,7 +482,7 @@ final class DictationController {
             let summary = ChangeSummarizer.summarize(raw: selection, final: rewritten, usedLLM: true, llmFailed: false)
             let result = DictationResult(
                 raw: "[\(instruction)] \(selection)", final: rewritten, style: .neutral,
-                appBundleID: sessionApp, summary: summary, latency: 0)
+                appBundleID: app, summary: summary, latency: 0)
             history.append(result)
             state.history = history.items
             switch outcome {
@@ -486,6 +500,7 @@ final class DictationController {
         prepared = false
         startSoundPlayed = false
         pendingStartSound = false
+        panelShown = false
         session = nil
         segmenter = nil
         chunkStream = nil
@@ -508,7 +523,11 @@ final class DictationController {
         Task {
             // Give the menu time to close so the previous app has focus again.
             try? await Task.sleep(nanoseconds: 250_000_000)
-            _ = await TextInserter.insert(last.final)
+            switch await TextInserter.insert(last.final) {
+            case .pasted: break
+            case .copiedToClipboard: overlay.show(.done(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), undo: false))
+            case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
+            }
         }
     }
 

@@ -273,7 +273,7 @@ public enum RuleCleaner {
         }
         // Lowercase "i" as a word is always "I".
         result = result.replacingOccurrences(
-            of: #"(?<![\p{L}\p{N}'./@_-])i(?=(?:'(?:m|ll|d|ve|s))?(?![\p{L}\p{N}./@_-]))"#,
+            of: #"(?<![\p{L}\p{N}'./@_-])i(?=(?:'(?:m|ll|d|ve|s))?(?![\p{L}\p{N}/@_-])(?!\.[\p{L}\p{N}]))"#,
             with: "I", options: .regularExpression)
         return result
     }

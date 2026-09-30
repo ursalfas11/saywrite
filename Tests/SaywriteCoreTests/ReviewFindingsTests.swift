@@ -108,6 +108,12 @@ final class ReviewFindingsTests: XCTestCase {
             output: "Bau eine neue Webseite.", style: .neutral), "Bau eine neue Webseite.")
     }
 
+    func testEnglishLowercaseI() {
+        XCTAssertEqual(full("so do i.", language: .english), "So do I.")
+        XCTAssertEqual(full("write to i@example.com, i.e. the inbox", language: .english), "Write to i@example.com, i.e. the inbox.")
+        XCTAssertEqual(full("i'm sure i'll be there", language: .english), "I'm sure I'll be there.")
+    }
+
     func testCorrectedNumbers() {
         XCTAssertEqual(CleanupGate.correctedNumbers(in: "Bring 2 bottles, wait, 3 bottles of water.", language: .english), ["3"])
         XCTAssertEqual(CleanupGate.correctedNumbers(in: "Ich komme um 5, nein, um 6.", language: .german), ["6"])
