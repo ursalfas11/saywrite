@@ -28,11 +28,11 @@ Local, instant AI dictation for macOS that only lets AI touch your words when th
 Most dictation apps run every sentence you say through a language model. That is slow, and it rewrites text that was fine to begin with. Saywrite flips that around:
 
 - 💸 **Completely free.** No trial, no paywall, no "pro" tier, no account. Everything runs on your Mac, so there is nothing to pay for.
-- ⚡ **Text before you blink.** Saywrite transcribes and cleans up *while you are still talking*. When you tap the key to stop, the work is basically done: **0.1–0.25 s from stop to text**, including AI corrections.
-- 🎯 **AI only where it is needed.** Every dictation gets instant, deterministic cleanup: filler words, stutters, capitalization, punctuation and spoken commands. The language model only sees the **single sentence** that needs it, for example when you correct yourself mid-sentence. Everything else stays exactly as you said it.
+- ⚡ **Text before you blink.** Saywrite transcribes and cleans up *while you are still talking*. When you tap the key to stop, the work is basically done: typically **about a quarter of a second from stop to text**, including AI corrections.
+- 🎯 **AI only where it is needed.** Every dictation gets instant, deterministic cleanup: filler words, stutters, capitalization, punctuation and spoken commands. The language model only sees the **sentence** that needs it (plus the one before, when you correct yourself across a pause). Everything else stays exactly as you said it.
 - 👀 **You always know what changed.** After every dictation the panel shows a summary like `2 filler words · AI: 1 correction`, and one click on **↩ Original** swaps in the version without AI.
 - 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model runs locally through Ollama. Nothing leaves your Mac, and there is no telemetry.
-- 🪶 **Light on memory.** Built for an 8 GB MacBook. The speech model lives on the Neural Engine, and the LLM is only loaded while you dictate.
+- 🪶 **Light on memory.** Built for an 8 GB MacBook. The speech model lives on the Neural Engine, and the LLM is loaded when you start dictating and released after 15 idle minutes.
 - 🌍 **English and German**, with automatic language detection. The speech model understands 25 European languages.
 
 <div align="center">
@@ -47,12 +47,12 @@ Most dictation apps run every sentence you say through a language model. That is
 | **Live transcript** | See your words while you speak. Finished parts are already shown cleaned up. |
 | **Self-corrections** | "I'll be there at 5, no, at 6" → *I'll be there at 6.* "We could order pizza. Actually, scratch that, let's cook." → *Let's cook.* This also works across a pause. |
 | **Rewrite by voice** | Select text, tap right ⌘ and say "more formal", "shorter" or "in German". |
-| **Style per app** | Casual in Messages, WhatsApp and Slack (no trailing period), formal in Mail and Word ("gonna" → "going to"), neutral everywhere else. Fully configurable. |
+| **Style per app** | Casual in Messages, WhatsApp and Slack (no period after a single sentence), formal in Mail and Word ("gonna" → "going to"), neutral everywhere else. Fully configurable. |
 | **Dictionary** | Names and terms are always written your way ("git hub" → "GitHub"). Applied as a rule, never guessed. |
 | **Spoken commands** | comma, question mark, exclamation mark, colon, semicolon, open/close quote, open/close paren, new line, new paragraph. The German equivalents work too. |
 | **Knows what to leave alone** | "The comma is missing", "a new line of credit", "I think that that is right", e-mail addresses, URLs and abbreviations like "e.g." stay exactly as spoken. |
-| **Safe AI** | A guard rejects model output that answers your question instead of transcribing it, invents text, or loses the number you corrected to. You then get the rule-cleaned version. |
-| **Never loses a word** | If Ollama is down or slow, the rules-only text is inserted. Password fields are detected, and your recent dictations are kept in the history. |
+| **Safe AI** | A guard rejects model output that answers your question instead of transcribing it, invents text, or loses a number you corrected to. You then get the rule-cleaned version. |
+| **Never loses a word** | If Ollama is down or slow, the rules-only text is inserted. Password fields are detected, "Nothing heard" and a silent microphone are reported, and your recent dictations are kept in the history. |
 | **Your microphone** | Pick any input device. Switching to AirPods mid-dictation is handled. |
 | **Hands-free safety** | A forgotten recording stops by itself after 60 s of silence. |
 
@@ -60,7 +60,7 @@ Most dictation apps run every sentence you say through a language model. That is
 
 Measured with the real models, on a MacBook with 8 GB RAM.
 
-**Latency** (`scripts/bench.sh`, time from stop to finished text):
+**Latency** (`scripts/bench.sh`, time from the end of speech to finished text; the app records 0.15 s longer so the last syllable is never cut off):
 
 | Dictation | Rules only | With AI self-correction |
 |---|---|---|
@@ -72,7 +72,7 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 
 | Test set | Cases | Exactly right |
 |---|---|---|
-| English | 46 | 97 % |
+| English | 130 | 90 % |
 | German | 107 | 90 % |
 
 The sets cover everyday messages, e-mails, self-corrections of many shapes, sentences that must not change, numbers, dates, URLs, math, spoken commands and all three styles.
@@ -96,7 +96,7 @@ flowchart LR
 
 1. **Tapping the key** starts recording and primes the language model in the background, so there is no cold start later.
 2. **A voice-activity detector** (Silero) cuts your speech at natural pauses. **Parakeet Ultra** transcribes each piece on the Neural Engine right away, while you keep talking.
-3. **The language is detected** per dictation (English or German), and **deterministic rules** for that language clean every piece instantly.
+3. **The language is detected** from the recognized words (English or German), and **deterministic rules** for that language clean every piece instantly.
 4. **A gate** decides per sentence whether the model is needed at all. Most sentences never reach it.
 5. **An output guard** checks what the model returns: mostly your own words, a plausible length, and the corrected values still present. Anything else is thrown away.
 6. **The text is joined and pasted once**, so your cursor doesn't jump around, and your clipboard is restored afterwards.
@@ -132,7 +132,7 @@ On first launch Saywrite asks for **Microphone** and **Accessibility** access. A
 | Rewrite a selection | Select text, tap **right ⌘**, speak the instruction, tap again |
 | Paste the last dictation | Menu bar icon → *Paste last dictation* |
 
-Everything else is in the menu bar icon → **Settings**: keys, microphone, language, models, styles per app, dictionary and history. The interface follows your system language (English or German).
+Everything else is in the menu bar icon → **Settings**: keys, microphone, language, models, styles per app, dictionary and history. The interface, including the permission prompts, follows your system language (English or German).
 
 ## Configuration tips
 

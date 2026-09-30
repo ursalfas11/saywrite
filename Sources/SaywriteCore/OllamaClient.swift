@@ -18,7 +18,7 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
             model: String = "qwen2.5:3b",
             rewriteModel: String? = nil,
             keepAlive: String = "15m",
-            cleanupTimeout: TimeInterval = 10,
+            cleanupTimeout: TimeInterval = 4,
             rewriteTimeout: TimeInterval = 30
         ) {
             self.baseURL = baseURL

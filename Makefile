@@ -14,6 +14,7 @@ app: build
 	cp "$$(swift build -c release --show-bin-path)/$(APP_NAME)" $(APP)/Contents/MacOS/$(APP_NAME)
 	cp Support/Info.plist $(APP)/Contents/Info.plist
 	[ -f Support/AppIcon.icns ] && cp Support/AppIcon.icns $(APP)/Contents/Resources/ || true
+	cp -R Support/en.lproj Support/de.lproj $(APP)/Contents/Resources/
 	@# Ad-hoc signature with a designated requirement on the bundle identifier only, so macOS keeps
 	@# the Accessibility permission across rebuilds (the default ad-hoc requirement is the cdhash).
 	codesign --force --sign - --identifier dev.saywrite.app \

@@ -59,12 +59,15 @@ final class HotkeyMonitor {
                 return Unmanaged.passUnretained(event)
             }
             if let nsEvent = NSEvent(cgEvent: event) {
-                MainActor.assumeIsolated { monitor.handle(nsEvent) }
+                // Esc that cancels a recording is swallowed, so it does not also close a dialog or
+                // leave full screen in the app underneath.
+                let consumed = MainActor.assumeIsolated { monitor.handle(nsEvent) }
+                if consumed { return nil }
             }
             return Unmanaged.passUnretained(event)
         }
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
             eventsOfInterest: CGEventMask(mask), callback: callback,
             userInfo: Unmanaged.passUnretained(self).toOpaque())
         else {
@@ -114,18 +117,20 @@ final class HotkeyMonitor {
         confirmTimer?.invalidate()
     }
 
-    private func handle(_ event: NSEvent) {
+    /// Returns true when the event should not reach other apps.
+    private func handle(_ event: NSEvent) -> Bool {
         switch event.type {
         case .keyDown:
-            handleKeyDown(event)
+            return handleKeyDown(event)
         case .flagsChanged:
             handleFlags(event)
+            return false
         default:
-            break
+            return false
         }
     }
 
-    private func handleKeyDown(_ event: NSEvent) {
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
         if event.keyCode == 53 /* Escape */ {
             if let active {
                 handsFree = false
@@ -134,7 +139,7 @@ final class HotkeyMonitor {
                 pressTime = nil
                 confirmTimer?.invalidate()
                 onEvent?(.cancel(active))
-                return
+                return true
             }
         }
         // Another key while holding the trigger means the user typed a shortcut (e.g. ⌥L for @).
@@ -144,6 +149,7 @@ final class HotkeyMonitor {
             confirmTimer?.invalidate()
             onEvent?(.cancel(active))
         }
+        return false
     }
 
     private func handleFlags(_ event: NSEvent) {

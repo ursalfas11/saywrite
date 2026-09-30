@@ -51,6 +51,8 @@ struct SegmentResult: Sendable {
     var ruled: String = ""
     var continuesPrevious = false
     var language: DictationLanguage = .german
+    /// Corrections whose LLM call already failed; not retried in `finish()`.
+    var attemptedCorrections: Set<String> = []
     var usedLLM: Bool
     var llmFailed: Bool
 
@@ -145,6 +147,7 @@ public actor DictationSession {
         var output: [String] = []
         var usedLLM = false
         var llmFailed = false
+        var attemptedCorrections: Set<String> = []
         for unit in units {
             // "… Aber nee, vergiss das, ich meine …" corrects the sentence before it. That needs the
             // previous sentence as input; a correction at the very start of a segment is handled
@@ -160,7 +163,8 @@ public actor DictationSession {
                     Debug.log("llm (with previous sentence): \(combined) -> \(improved)")
                     // Returning only the discarded sentence means the model misunderstood.
                     guard !LLMOutputGuard.sameWords(improved, previous),
-                          !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved)
+                          !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved),
+                          Self.keepsCorrectedNumbers(combined, improved, language)
                     else { throw LLMError.rejectedOutput }
                     output.append(RuleCleaner.clean(improved, language: language))
                     usedLLM = true
@@ -168,6 +172,7 @@ public actor DictationSession {
                     Debug.log("llm failed: \(error)")
                     llmFailed = true
                     output.append(contentsOf: [previous, unit])
+                    attemptedCorrections.insert(unit)
                 }
                 continue
             }
@@ -188,10 +193,7 @@ public actor DictationSession {
                 guard isCorrection || LLMOutputGuard.sameWords(unit, improved) else { throw LLMError.rejectedOutput }
                 guard !LLMOutputGuard.removedOnlyMarkers(input: unit, output: improved) else { throw LLMError.rejectedOutput }
                 // The corrected numbers must be in the result, otherwise the model kept the wrong version.
-                let outputNumbers = Set(improved.split(whereSeparator: { !$0.isNumber }).map(String.init))
-                guard CleanupGate.correctedNumbers(in: unit, language: language).allSatisfy(outputNumbers.contains) else {
-                    throw LLMError.rejectedOutput
-                }
+                guard Self.keepsCorrectedNumbers(unit, improved, language) else { throw LLMError.rejectedOutput }
                 output.append(RuleCleaner.clean(improved, language: language))
                 usedLLM = true
             } catch {
@@ -200,7 +202,9 @@ public actor DictationSession {
                 output.append(unit)
             }
         }
-        return SegmentResult(raw: raw, units: output, ruled: ruled, usedLLM: usedLLM, llmFailed: llmFailed)
+        var result = SegmentResult(raw: raw, units: output, ruled: ruled, usedLLM: usedLLM, llmFailed: llmFailed)
+        result.attemptedCorrections = attemptedCorrections
+        return result
     }
 
     /// Wait for all segments and build the final text. Returns nil when nothing was said.
@@ -231,9 +235,12 @@ public actor DictationSession {
 
         // "Ich komme um fünf. … Nein, um sechs." – after a pause the correction lands in its own
         // sentence, so it is merged with the sentence it corrects.
+        let alreadyTried = spoken.reduce(into: Set<String>()) { $0.formUnion($1.attemptedCorrections) }
         var index = 1
         while index < units.count {
-            guard CleanupGate.startsWithCorrection(units[index], language: language), let llm else {
+            // A model that already failed (timeout) is not asked again: that would double the wait.
+            guard CleanupGate.startsWithCorrection(units[index], language: language), let llm,
+                  !alreadyTried.contains(units[index]) else {
                 index += 1
                 continue
             }
@@ -242,7 +249,8 @@ public actor DictationSession {
                 let improved = try await llm.cleanup(text: combined, style: style, language: language)
                 Debug.log("llm (across pause): \(combined) -> \(improved)")
                 guard !LLMOutputGuard.sameWords(improved, units[index - 1]),
-                      !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved)
+                      !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved),
+                      Self.keepsCorrectedNumbers(combined, improved, language)
                 else { throw LLMError.rejectedOutput }
                 units[index - 1] = RuleCleaner.clean(improved, language: language)
                 units.remove(at: index)
@@ -277,6 +285,11 @@ public actor DictationSession {
         tasks.forEach { $0.cancel() }
         tasks.removeAll()
         completed.removeAll()
+    }
+
+    static func keepsCorrectedNumbers(_ input: String, _ output: String, _ language: DictationLanguage) -> Bool {
+        let outputNumbers = Set(output.split(whereSeparator: { !$0.isNumber }).map(String.init))
+        return CleanupGate.correctedNumbers(in: input, language: language).allSatisfy(outputNumbers.contains)
     }
 
     /// "Ich komme um fünf." + "Nein, um sechs." or "am Donnerstag" + "nein, am Freitag".

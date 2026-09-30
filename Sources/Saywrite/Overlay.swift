@@ -73,10 +73,20 @@ final class OverlayController {
         if case .recording = state, !isRecording { model.reset() }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { model.state = state }
         if state == .hidden {
-            panel.orderOut(nil)
+            // Fade out instead of vanishing.
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.18
+                panel.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.model.state == .hidden else { return }
+                    self.panel.orderOut(nil)
+                }
+            })
             return
         }
         position()
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
 
         switch state {
@@ -196,7 +206,7 @@ struct OverlayView: View {
     }
 
     private var processingLabel: String {
-        model.isRewrite ? L("Rewriting …", "Formuliere um …") : L("Inserting …", "Wird eingefügt …")
+        model.isRewrite ? L("Rewriting…", "Formuliere um …") : L("Inserting…", "Wird eingefügt …")
     }
 
     private var spacer: String {
@@ -205,8 +215,8 @@ struct OverlayView: View {
 
     private var placeholder: String {
         switch model.state {
-        case .recording(_, true): return L("Say what should happen to the selected text …", "Sag, was mit dem markierten Text passieren soll …")
-        case .recording: return L("Listening …", "Sprich jetzt …")
+        case .recording(_, true): return L("Say what should happen to the selected text…", "Sag, was mit dem markierten Text passieren soll …")
+        case .recording: return L("Listening…", "Sprich jetzt …")
         default: return ""
         }
     }
@@ -280,6 +290,7 @@ struct OverlayView: View {
             .font(.system(size: 11, weight: .medium, design: .rounded))
             .foregroundStyle(.white.opacity(0.75))
             .lineLimit(1)
+            .minimumScaleFactor(0.75)
     }
 }
 

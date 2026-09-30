@@ -24,15 +24,24 @@ enum TextInserter {
 
     /// `onPasted` runs right after ⌘V was sent, before the clipboard is restored, so feedback
     /// (sound, closing the panel) is not delayed by the restore wait.
+    /// The user's own clipboard while one of our pastes is still waiting to restore it. A second
+    /// insert in that window must not save our temporary text as "the user's clipboard".
+    private static var userClipboard: [SavedItem]??
+    private static var pasteGeneration = 0
+
     static func insert(_ text: String, onPasted: (() -> Void)? = nil) async -> InsertOutcome {
         let pasteboard = NSPasteboard.general
         if isSecureInputActive() { return .secureField }
-        guard focusedElement() != nil else {
+        // Electron apps (Slack, VS Code, Discord) often expose no focused element but accept ⌘V,
+        // so only a missing frontmost app means "nowhere to paste".
+        guard NSWorkspace.shared.frontmostApplication != nil else {
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
             return .copiedToClipboard
         }
-        let saved = savePasteboard()
+        if userClipboard == nil { userClipboard = .some(savePasteboard()) }
+        pasteGeneration += 1
+        let generation = pasteGeneration
         pasteboard.clearContents()
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)
@@ -43,9 +52,12 @@ enum TextInserter {
         onPasted?()
         // Slow apps (Electron) read the clipboard late; restore only after they had time.
         try? await Task.sleep(nanoseconds: 800_000_000)
-        if pasteboard.changeCount == changeCount, let saved {
+        // Only the latest paste restores, and only if nobody copied something else meanwhile.
+        guard generation == pasteGeneration else { return .pasted }
+        if pasteboard.changeCount == changeCount, case .some(.some(let saved)) = userClipboard {
             restorePasteboard(saved)
         }
+        userClipboard = nil
         return .pasted
     }
 

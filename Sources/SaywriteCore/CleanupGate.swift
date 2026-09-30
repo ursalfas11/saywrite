@@ -52,6 +52,7 @@ public enum CleanupGate {
     static let bareNein = #"^(?:nein|nee|ne)\b\s*,?\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|erst|\d+|null|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\b"#
 
     public static func startsWithCorrection(_ sentence: String, language: DictationLanguage = .german) -> Bool {
+        guard language != .other else { return false }
         let lower = sentence.lowercased()
         let leading = language == .english ? englishLeadingPatterns : leadingPatterns
         if leading.contains(where: { lower.range(of: $0, options: .regularExpression) != nil }) { return true }
@@ -70,7 +71,7 @@ public enum CleanupGate {
         #"[\p{L}\p{N}],\s*(?:(?:oh|or)\s+)?no(?:\s+wait)?\s*,\s*"# + englishNotACorrection + #"\S"#,
         #",\s*i mean\b(?!\s*,?\s*(?:it|that|this|we|i|you|they|he|she|seriously|honestly|really|come on)\b)"#,
         #",\s*or rather\b"#,
-        #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|the|\d)"#,
+        #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
         #",\s*make (?:that|it)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|ten)\b"#,
         #",\s*wait\s*,"#,
         #",\s*(?:sorry|pardon)\s*,\s*(?:at|on|in|to|for|by|from|\d)"#,
@@ -115,6 +116,7 @@ public enum CleanupGate {
     static let longSegmentWords = 60
 
     public static func decide(raw: String, style: Style, language: DictationLanguage = .german) -> GateDecision {
+        guard language != .other else { return .rulesOnly }
         let hasCorrection = containsCorrection(raw, language: language)
 
         if style == .casual {

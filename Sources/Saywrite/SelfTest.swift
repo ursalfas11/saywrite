@@ -74,6 +74,7 @@ enum OverlaySnapshot {
     @MainActor
     static func run(directory: String) -> Int32 {
         UILanguage.override = false // screenshots are in English
+        try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         let states: [(String, OverlayState, String, String)] = [
             ("recording", .recording(handsFree: true, rewrite: false), "I'd like to buy a new bike.", "Ideally one with lights"),
             ("empty", .recording(handsFree: true, rewrite: false), "", ""),

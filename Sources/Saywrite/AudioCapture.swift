@@ -60,6 +60,8 @@ final class AudioCapture: @unchecked Sendable {
     private var sampleHandler: (([Float]) -> Void)?
     /// Normalized 0...1 loudness for the overlay meter.
     var onLevel: ((Float) -> Void)?
+    /// The input device went away mid-recording and no replacement could be started.
+    var onDeviceLost: (() -> Void)?
 
     private var engine = AVAudioEngine()
     private let lock = NSLock()
@@ -83,6 +85,9 @@ final class AudioCapture: @unchecked Sendable {
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         lock.unlock()
+        // A fresh engine each time, so switching back to "System default" or a device that was
+        // plugged in since the last recording takes effect.
+        engine = AVAudioEngine()
         try startEngine()
         isRunning = true
         // Headphones connected or the default input changed: continue with the new device instead
@@ -94,7 +99,11 @@ final class AudioCapture: @unchecked Sendable {
             self.engine.inputNode.removeTap(onBus: 0)
             self.engine.stop()
             self.engine = AVAudioEngine()
-            try? self.startEngine()
+            do {
+                try self.startEngine()
+            } catch {
+                self.onDeviceLost?()
+            }
         }
     }
 

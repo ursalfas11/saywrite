@@ -40,6 +40,9 @@ final class DictationController {
     private let audio = AudioCapture()
     private let sounds = Sounds()
     private var startSoundPlayed = false
+    private var pendingStartSound = false
+    private var audioFlowing = false
+    private var peakLevel: Float = 0
 
     private enum Phase { case idle, recording(HotkeyAction), processing }
     private var phase: Phase = .idle
@@ -53,7 +56,6 @@ final class DictationController {
     private var errorAction: (() -> Void)?
     private var prepared = false
     private var previewTask: Task<Void, Never>?
-    private var overlayTask: Task<Void, Never>?
     private var sessionApp: String?
     private var recordingStart = Date()
     private var lastVoice = Date()
@@ -75,6 +77,12 @@ final class DictationController {
         hotkeys.onEvent = { [weak self] event in self?.handle(event) }
         overlay.onStop = { [weak self] in self?.stopFromOverlay() }
         overlay.onUndo = { [weak self] in self?.insertOriginal() }
+        audio.onDeviceLost = { [weak self] in
+            guard let self, case .recording(let action) = self.phase else { return }
+            self.hotkeys.reset()
+            self.requestFinish(action) // keep what was said so far
+            self.showError(L("Microphone disconnected", "Mikrofon getrennt"), action: nil)
+        }
         overlay.onErrorClick = { [weak self] in
             self?.errorAction?()
             self?.overlay.show(.hidden)
@@ -84,6 +92,12 @@ final class DictationController {
                 guard let self else { return }
                 self.overlay.model.push(level: level)
                 if level > 0.25 { self.lastVoice = Date() }
+                self.peakLevel = max(self.peakLevel, level)
+                if !self.audioFlowing {
+                    self.audioFlowing = true
+                    // The start sound waits for real audio, so nobody talks into a mic that is not open yet.
+                    if self.pendingStartSound { self.playStartSound() }
+                }
             }
         }
     }
@@ -171,7 +185,15 @@ final class DictationController {
     }
 
     private var llm: LLMClient? {
-        settings.aiEnabled ? OllamaClient(configuration: settings.ollamaConfiguration) : nil
+        guard settings.aiEnabled else { return nil }
+        var configuration = settings.ollamaConfiguration
+        // Prime the prompt of the language that was dictated last (or the fixed setting).
+        switch settings.language {
+        case "de": configuration.prewarmLanguage = .german
+        case "en": configuration.prewarmLanguage = .english
+        default: configuration.prewarmLanguage = DictationLanguage.lastDetected ?? (UILanguage.isGerman ? .german : .english)
+        }
+        return OllamaClient(configuration: configuration)
     }
 
     /// Runs once per session, as soon as it is clear the user really dictates.
@@ -190,7 +212,7 @@ final class DictationController {
         }
         guard state.modelState == .ready else {
             if case .loading(let progress) = state.modelState {
-                showError(L("Speech model is loading (\(Int(progress * 100)) %) – almost ready", "Sprachmodell wird geladen (\(Int(progress * 100)) %) – gleich geht's los"), action: nil)
+                showError(L("Speech model is loading (\(Int(progress * 100))%) – almost ready", "Sprachmodell wird geladen (\(Int(progress * 100)) %) – gleich geht's los"), action: nil)
             } else {
                 showError(L("Speech model not available", "Sprachmodell nicht verfügbar"), action: nil)
             }
@@ -240,27 +262,27 @@ final class DictationController {
         phase = .recording(action)
         recordingStart = Date()
         lastVoice = Date()
+        audioFlowing = false
+        peakLevel = 0
 
-        // Right ⌥ is also used for @, € and brackets: only show the panel once it is clearly a
-        // dictation (confirmed, hands-free) or after a short moment.
+        // Right ⌥ is also used for @, € and brackets: the panel and sound only appear once it is
+        // clearly a dictation (tap for hands-free, or held past the shortcut window).
         overlay.model.reset()
         overlay.model.isRewrite = action == .rewrite
-        let id = sessionID
-        overlayTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            guard let self, !Task.isCancelled, self.sessionID == id, case .recording = self.phase else { return }
-            self.showRecordingOverlay(action, handsFree: handsFree)
-        }
-        startPreview(session: session, segmenter: segmenter, id: id)
+        startPreview(session: session, segmenter: segmenter, id: sessionID)
     }
 
     private func showRecordingOverlay(_ action: HotkeyAction, handsFree: Bool) {
         overlay.show(.recording(handsFree: handsFree, rewrite: action == .rewrite))
-        // The sound comes together with the panel, once per recording.
-        if !startSoundPlayed {
-            startSoundPlayed = true
-            if settings.playSounds { sounds.playStart() }
-        }
+        // The sound comes together with the panel, once per recording, and only with live audio.
+        if audioFlowing { playStartSound() } else { pendingStartSound = true }
+    }
+
+    private func playStartSound() {
+        pendingStartSound = false
+        guard !startSoundPlayed, case .recording = phase else { return }
+        startSoundPlayed = true
+        if settings.playSounds { sounds.playStart() }
     }
 
     /// Shows what is being said while recording: finished segments in their cleaned form, plus a
@@ -309,14 +331,12 @@ final class DictationController {
         guard case .recording(let current) = phase, current == action else { return }
         phase = .processing
         previewTask?.cancel()
-        overlayTask?.cancel()
         if !prepared { prepare(action) }
         Task { await finish(action) }
     }
 
     private func cancel() {
         previewTask?.cancel()
-        overlayTask?.cancel()
         audio.stop()
         audio.setSampleHandler(nil)
         chunkStream?.finish()
@@ -328,6 +348,7 @@ final class DictationController {
     }
 
     private func finish(_ action: HotkeyAction) async {
+        let id = sessionID
         overlay.show(.processing)
         // Keep recording a moment so the last syllable is not cut off.
         try? await Task.sleep(nanoseconds: 150_000_000)
@@ -338,14 +359,23 @@ final class DictationController {
 
         switch action {
         case .dictate:
-            await finishDictation()
+            await finishDictation(id: id)
         case .rewrite:
-            await finishRewrite(samples: allSamples)
+            await finishRewrite(samples: allSamples, id: id)
         }
-        teardown()
+        // A new dictation may already have started right after the paste.
+        if sessionID == id { teardown() }
     }
 
-    private func finishDictation() async {
+    /// Ready for the next dictation as soon as the text landed (the clipboard restore runs on).
+    private func readyForNext(_ id: UUID) {
+        guard sessionID == id, case .processing = phase else { return }
+        phase = .idle
+        prepared = false
+        startSoundPlayed = false
+    }
+
+    private func finishDictation(id: UUID) async {
         guard let session, let segmenter else {
             overlay.show(.hidden)
             return
@@ -354,7 +384,12 @@ final class DictationController {
             await session.addSegment(rest)
         }
         guard let result = await session.finish() else {
-            overlay.show(.hidden)
+            if peakLevel < 0.05 {
+                showError(L("No sound from the microphone – check the input device", "Kein Ton vom Mikrofon – Eingabegerät prüfen"),
+                          action: Permissions.openMicrophoneSettings)
+            } else {
+                overlay.show(.done(L("Nothing heard", "Nichts gehört"), undo: false))
+            }
             return
         }
         overlay.model.committedText = result.final
@@ -366,6 +401,7 @@ final class DictationController {
             guard let self else { return }
             if self.settings.playSounds { self.sounds.playStop() }
             self.overlay.show(.done(result.summary.text, undo: hasOriginal))
+            self.readyForNext(id)
         })
         history.append(result)
         state.history = history.items
@@ -384,15 +420,25 @@ final class DictationController {
         guard let result = undoCandidate, let original = result.withoutAI else { return }
         undoCandidate = nil
         overlay.model.committedText = original
+        // ⌘Z only makes sense in the app that received the text; otherwise just offer the original.
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == result.appBundleID else {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(original, forType: .string)
+            overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
+            return
+        }
         TextInserter.undo()
         Task {
             try? await Task.sleep(nanoseconds: 120_000_000)
-            _ = await TextInserter.insert(original)
-            overlay.show(.done(L("Original inserted", "Original eingefügt"), undo: false))
+            switch await TextInserter.insert(original) {
+            case .pasted: overlay.show(.done(L("Original inserted", "Original eingefügt"), undo: false))
+            case .copiedToClipboard: overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
+            case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
+            }
         }
     }
 
-    private func finishRewrite(samples: [Float]) async {
+    private func finishRewrite(samples: [Float], id: UUID) async {
         let selection = await selectionTask?.value
         guard let selection else {
             showError(L("No text selected", "Kein Text markiert"), action: nil)
@@ -417,6 +463,7 @@ final class DictationController {
                 guard let self else { return }
                 if self.settings.playSounds { self.sounds.playStop() }
                 self.overlay.show(.done(L("Rewritten", "Umformuliert"), undo: false))
+                self.readyForNext(id)
             })
             let summary = ChangeSummarizer.summarize(raw: selection, final: rewritten, usedLLM: true, llmFailed: false)
             let result = DictationResult(
@@ -438,13 +485,13 @@ final class DictationController {
         phase = .idle
         prepared = false
         startSoundPlayed = false
+        pendingStartSound = false
         session = nil
         segmenter = nil
         chunkStream = nil
         chunkConsumer = nil
         selectionTask = nil
         previewTask = nil
-        overlayTask = nil
     }
 
     private func showError(_ message: String, action: (() -> Void)?) {

@@ -46,7 +46,7 @@ final class ChangeSummarizerTests: XCTestCase {
     func testEnglishSummary() {
         UILanguage.override = false
         let s = ChangeSummarizer.summarize(raw: "um I'll come tomorrow", final: "I'll come tomorrow.", usedLLM: false, llmFailed: false, language: .english)
-        XCTAssertEqual(s.text, "1 filler word · 1 punctuation")
+        XCTAssertEqual(s.text, "1 filler · 1 punctuation fix")
     }
 
     func testUnchanged() {

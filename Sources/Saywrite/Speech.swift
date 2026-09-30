@@ -97,6 +97,11 @@ actor Segmenter {
                 inSpeech = true
             case .speechEnd:
                 inSpeech = false
+                defer {
+                    // Also when a forced cut already consumed this audio: the next utterance starts fresh.
+                    speechSinceCut = false
+                    afterForcedCut = false
+                }
                 // The VAD's end index already includes `speechPadding`.
                 let cut = min(buffer.count, event.sampleIndex)
                 if speechSinceCut, cut > lastCut {

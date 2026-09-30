@@ -40,9 +40,12 @@ public struct ChangeSummary: Equatable, Codable, Sendable {
         var parts: [String] = []
         if fillersRemoved > 0 {
             parts.append(de ? "\(fillersRemoved) \(fillersRemoved == 1 ? "Füllwort" : "Füllwörter")"
-                            : "\(fillersRemoved) filler \(fillersRemoved == 1 ? "word" : "words")")
+                            : "\(fillersRemoved) \(fillersRemoved == 1 ? "filler" : "fillers")")
         }
-        if punctuationChanged > 0 { parts.append(de ? "\(punctuationChanged) Satzzeichen" : "\(punctuationChanged) punctuation") }
+        if punctuationChanged > 0 {
+            parts.append(de ? "\(punctuationChanged) Satzzeichen"
+                            : "\(punctuationChanged) punctuation \(punctuationChanged == 1 ? "fix" : "fixes")")
+        }
         if replacements > 0 {
             parts.append(de ? "\(replacements) \(replacements == 1 ? "Ersetzung" : "Ersetzungen")"
                             : "\(replacements) \(replacements == 1 ? "replacement" : "replacements")")

@@ -20,8 +20,10 @@ public enum RuleCleaner {
         "much", "many", "blah", "bla", "far", "hey", "knock", "chop", "more", "again", "over", "round", "on",
     ]
     static let englishDoubles: Set<String> = ["that", "had", "is"]
+    /// Words before a command phrase that make it content ("the comma", "our new line of shoes").
     static let englishDeterminers: Set<String> = [
-        "the", "a", "an", "this", "that", "my", "your", "his", "her", "our", "their", "no", "one", "any", "each",
+        "the", "a", "an", "this", "that", "my", "your", "his", "her", "our", "their", "its", "no", "one", "any", "each",
+        "big", "huge", "small", "another", "every", "some", "same", "first", "last", "quote",
     ]
 
     /// Words that people legitimately repeat for emphasis; never collapsed.
@@ -73,6 +75,7 @@ public enum RuleCleaner {
 
     public static func clean(_ text: String, language: DictationLanguage = .german) -> String {
         var result = text
+        guard language != .other else { return normalizeWhitespace(result) }
         result = removeFillers(result, language: language)
         result = collapseStutter(result, language: language)
         if language == .english {
@@ -236,7 +239,7 @@ public enum RuleCleaner {
     /// them ("the question mark", "a new line") means they are content.
     static func applyEnglishCommands(_ text: String) -> String {
         var result = text
-        let determiner = #"(?<!\b(?i:the|a|an|this|that|my|your|our|his|her|their|its|no|one|big|huge|small|another|every|each|any|some|same|first|last) )"#
+        let determiner = #"(?<!\b(?i:"# + englishDeterminers.sorted().joined(separator: "|") + #") )"#
         let punctuation: [(String, String)] = [
             (#"question mark"#, "?"), (#"exclamation (?:mark|point)"#, "!"), (#"semicolon"#, ";"),
             (#"colon(?! (?:cancer|surgery|cleanse|polyps?|screening|health))"#, ":"), (#"comma"#, ","), (#"full stop"#, "."),
@@ -269,7 +272,9 @@ public enum RuleCleaner {
                 with: replacement, options: .regularExpression)
         }
         // Lowercase "i" as a word is always "I".
-        result = result.replacingOccurrences(of: #"(?<![\p{L}'.])i(?!\.[a-z]\.)(?=(?:'[a-z]+)?(?![\p{L}]))"#, with: "I", options: .regularExpression)
+        result = result.replacingOccurrences(
+            of: #"(?<![\p{L}\p{N}'./@_-])i(?=(?:'(?:m|ll|d|ve|s))?(?![\p{L}\p{N}./@_-]))"#,
+            with: "I", options: .regularExpression)
         return result
     }
 
@@ -297,7 +302,9 @@ public enum RuleCleaner {
 
     public static func finalize(_ text: String, style: Style, language: DictationLanguage = .german) -> String {
         var result = normalizeWhitespace(text)
-        if style == .formal { result = expandShortForms(result, forms: language == .english ? englishShortForms : shortForms) }
+        if style == .formal, language != .other {
+            result = expandShortForms(result, forms: language == .english ? englishShortForms : shortForms)
+        }
         // A line that ends in a word before a paragraph/line break gets a period, except greeting and
         // closing lines of letters ("Mit freundlichen Grüßen", "Hallo Anna").
         result = result.replacingOccurrences(

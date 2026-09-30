@@ -98,7 +98,7 @@ private struct SetupTab: View {
 
     private var modelDetail: String {
         switch state.modelState {
-        case .loading(let p): return p > 0 && p < 1 ? L("Downloading … \(Int(p * 100)) %", "Wird geladen … \(Int(p * 100)) %") : L("Loading …", "Wird geladen …")
+        case .loading(let p): return p > 0 && p < 1 ? L("Downloading… \(Int(p * 100))%", "Wird geladen … \(Int(p * 100)) %") : L("Loading…", "Wird geladen …")
         case .ready: return L("Ready", "Bereit")
         case .failed(let message): return L("Error: \(message)", "Fehler: \(message)")
         }
@@ -106,7 +106,7 @@ private struct SetupTab: View {
 
     private var ollamaDetail: String {
         switch state.ollamaState {
-        case .unknown: return L("Checking …", "Wird geprüft …")
+        case .unknown: return L("Checking…", "Wird geprüft …")
         case .unreachable: return L("Not reachable", "Nicht erreichbar")
         case .modelMissing: return L("Model \(settings.ollamaModel) is missing", "Modell \(settings.ollamaModel) fehlt")
         case .ready: return L("Ready (\(settings.ollamaModel))", "Bereit (\(settings.ollamaModel))")

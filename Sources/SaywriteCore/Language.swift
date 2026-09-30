@@ -5,13 +5,15 @@ import Foundation
 public enum DictationLanguage: String, CaseIterable, Sendable {
     case german = "de"
     case english = "en"
+    /// Any other language the recognizer understands: language-neutral rules only, no AI cleanup.
+    case other = "other"
 
     /// Resolves a setting ("de", "en" or "auto") for a concrete text.
     public static func resolve(setting: String, text: String) -> DictationLanguage {
         switch setting {
         case "de": return .german
         case "en": return .english
-        default:
+        case "auto", "":
             // Short texts without telling words keep the language of the previous dictation,
             // since people rarely switch language between two dictations.
             if let detected = detect(text) {
@@ -19,10 +21,12 @@ public enum DictationLanguage: String, CaseIterable, Sendable {
                 return detected
             }
             return lastDetected ?? (UILanguage.isGerman ? .german : .english)
+        default:
+            return .other
         }
     }
 
-    nonisolated(unsafe) static var lastDetected: DictationLanguage?
+    nonisolated(unsafe) public static var lastDetected: DictationLanguage?
 
     static let germanMarkers: Set<String> = [
         "und", "der", "die", "das", "ich", "nicht", "ist", "ein", "eine", "zu", "mit", "wir", "du", "sie", "es",

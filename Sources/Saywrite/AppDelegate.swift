@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(aiItem)
 
         menu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: L("Settings …", "Einstellungen …"), action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: L("Settings…", "Einstellungen …"), action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: L("Quit Saywrite", "Saywrite beenden"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -104,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusLine: String {
         if !state.accessibilityGranted { return L("⚠ Accessibility access missing", "⚠ Bedienungshilfen fehlen") }
         switch state.modelState {
-        case .loading(let p): return L("Speech model loading … \(Int(p * 100)) %", "Sprachmodell lädt … \(Int(p * 100)) %")
+        case .loading(let p): return L("Speech model loading… \(Int(p * 100))%", "Sprachmodell lädt … \(Int(p * 100)) %")
         case .failed: return L("⚠ Speech model error", "⚠ Sprachmodell-Fehler")
         case .ready: return L("Ready – tap \(settings.dictateKey.displayName)", "Bereit – \(settings.dictateKey.displayName) tippen")
         }
