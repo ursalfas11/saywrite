@@ -1,41 +1,21 @@
 import AppKit
 import SaywriteCore
 
-enum HotkeyAction {
-    case dictate
-    case rewrite
-}
-
-enum HotkeyEvent {
-    /// Key went down: start recording right away (latency matters).
-    case begin(HotkeyAction)
-    /// Key held long enough to be push-to-talk, not a shortcut: good time to prewarm.
-    case confirmed(HotkeyAction)
-    /// Key released after a hold, or tapped again in hands-free mode: finish and insert.
-    case end(HotkeyAction)
-    /// Shortcut (another key pressed while holding) or Escape: throw the recording away.
-    case cancel(HotkeyAction)
-    /// Short tap: keep recording hands-free until the key is tapped again.
-    case handsFree(HotkeyAction)
-}
-
-/// Watches a modifier key that is held on its own, system-wide, via a listen-only CGEventTap
-/// (needs the Accessibility permission).
+/// Watches a modifier key that is held on its own, system-wide, via an active CGEventTap (needs
+/// the Accessibility permission). The tap is a filter, not listen-only, because Esc that cancels a
+/// recording is swallowed; every key press therefore waits for the callback, which must stay fast.
+/// The tap-or-hold logic lives in `HotkeyStateMachine`.
 @MainActor
 final class HotkeyMonitor {
     var dictateKey: TriggerKey
     var rewriteKey: TriggerKey
     var onEvent: ((HotkeyEvent) -> Void)?
 
-    private let minimumHold: TimeInterval = 0.3
-
+    private var machine = HotkeyStateMachine()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var active: HotkeyAction?
-    private var pressTime: Date?
-    private var interrupted = false
     private var confirmTimer: Timer?
-    private(set) var handsFree = false
+    var handsFree: Bool { machine.handsFree }
 
     init(dictateKey: TriggerKey, rewriteKey: TriggerKey) {
         self.dictateKey = dictateKey
@@ -84,7 +64,11 @@ final class HotkeyMonitor {
 
     func stop() {
         if let runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes) }
-        if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: false) }
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+            // Without invalidating, every restart (e.g. after granting Accessibility) leaks a port.
+            CFMachPortInvalidate(eventTap)
+        }
         eventTap = nil
         runLoopSource = nil
     }
@@ -95,7 +79,7 @@ final class HotkeyMonitor {
         if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
         // Events that arrived while the tap was disabled are lost. If the trigger key was released
         // in that window, deliver the release now so a hold does not record forever.
-        guard let active, pressTime != nil else { return }
+        guard let active = machine.heldAction else { return }
         let key = active == .dictate ? dictateKey : rewriteKey
         let flags = NSEvent.ModifierFlags(rawValue: UInt(CGEventSource.flagsState(.combinedSessionState).rawValue))
         let stillDown: Bool
@@ -105,21 +89,24 @@ final class HotkeyMonitor {
         case .rightControl: stillDown = flags.rawValue & 0x2000 != 0
         case .fn: stillDown = flags.contains(.function)
         }
-        if !stillDown { keyUp(active) }
+        if !stillDown { emit(machine.triggerUp(active)) }
     }
 
     /// Events are delivered after the tap callback returned: with a filtering tap every key press
     /// waits for the callback, so starting the microphone there would make typing lag.
-    private func emit(_ event: HotkeyEvent) {
-        DispatchQueue.main.async { [weak self] in self?.onEvent?(event) }
+    private func emit(_ events: [HotkeyEvent]) {
+        // Any outcome of the press other than its start ends the wait for "held long enough".
+        if events.contains(where: { if case .begin = $0 { return false } else { return true } }) {
+            confirmTimer?.invalidate()
+        }
+        for event in events {
+            DispatchQueue.main.async { [weak self] in self?.onEvent?(event) }
+        }
     }
 
     /// Called by the controller when a session ended by other means (error, cancel via menu).
     func reset() {
-        active = nil
-        pressTime = nil
-        handsFree = false
-        interrupted = false
+        machine.reset()
         confirmTimer?.invalidate()
     }
 
@@ -138,23 +125,13 @@ final class HotkeyMonitor {
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         if event.keyCode == 53 /* Escape */ {
-            if let active, !interrupted {
-                handsFree = false
-                interrupted = true
-                self.active = nil
-                pressTime = nil
-                confirmTimer?.invalidate()
-                emit(.cancel(active))
-                return true
-            }
+            let (events, consumed) = machine.escape()
+            emit(events)
+            return consumed
         }
-        // Another key while holding the trigger means the user typed a shortcut (e.g. ⌥L for @).
-        if let active, pressTime != nil, !interrupted {
-            Debug.log("cancel: key \(event.keyCode) pressed while holding")
-            interrupted = true
-            confirmTimer?.invalidate()
-            emit(.cancel(active))
-        }
+        let events = machine.otherKey()
+        if !events.isEmpty { Debug.log("cancel: key \(event.keyCode) pressed while holding") }
+        emit(events)
         return false
     }
 
@@ -166,19 +143,17 @@ final class HotkeyMonitor {
             action = .rewrite
         } else {
             // A different modifier pressed while holding: treat as shortcut.
-            if let active, pressTime != nil, !interrupted, !event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
-                Debug.log("cancel: modifier \(event.keyCode) flags \(event.modifierFlags.rawValue) while holding")
-                interrupted = true
-                confirmTimer?.invalidate()
-                emit(.cancel(active))
-            }
+            guard !event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty else { return }
+            let events = machine.otherModifier()
+            if !events.isEmpty { Debug.log("cancel: modifier \(event.keyCode) flags \(event.modifierFlags.rawValue) while holding") }
+            emit(events)
             return
         }
         let key = action == .dictate ? dictateKey : rewriteKey
         if isDown(key, event) {
             keyDown(action)
         } else {
-            keyUp(action)
+            emit(machine.triggerUp(action))
         }
     }
 
@@ -193,51 +168,15 @@ final class HotkeyMonitor {
     }
 
     private func keyDown(_ action: HotkeyAction) {
-        guard pressTime == nil else { return }
-        if handsFree {
-            // Only the key that started hands-free mode ends it; handled on release.
-            guard action == active else { return }
-            pressTime = Date()
-            interrupted = false
-            return
-        }
-        guard active == nil else { return }
-        active = action
-        pressTime = Date()
-        interrupted = false
-        emit(.begin(action))
+        let events = machine.triggerDown(action)
+        guard events.contains(.begin(action)) else { return }
+        emit(events)
         confirmTimer?.invalidate()
-        confirmTimer = Timer.scheduledTimer(withTimeInterval: minimumHold, repeats: false) { [weak self] _ in
+        confirmTimer = Timer.scheduledTimer(withTimeInterval: machine.minimumHold, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, let active = self.active, self.pressTime != nil, !self.interrupted else { return }
-                self.emit(.confirmed(active))
+                guard let self, let confirmed = self.machine.confirmation() else { return }
+                self.emit([confirmed])
             }
         }
-    }
-
-    private func keyUp(_ action: HotkeyAction) {
-        guard let pressTime, active == action else { return }
-        let held = Date().timeIntervalSince(pressTime)
-        self.pressTime = nil
-        confirmTimer?.invalidate()
-
-        if handsFree {
-            handsFree = false
-            active = nil
-            emit(.end(action))
-            return
-        }
-        if interrupted {
-            active = nil
-            return
-        }
-        if held >= minimumHold {
-            active = nil
-            emit(.end(action))
-            return
-        }
-        // Short tap: the recording that started on key down simply continues hands-free.
-        handsFree = true
-        emit(.handsFree(action))
     }
 }

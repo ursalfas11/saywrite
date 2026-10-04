@@ -17,6 +17,30 @@ public protocol LLMClient: Sendable {
 }
 
 /// Guards against a small model answering, summarizing or hallucinating instead of correcting.
+/// Stops asking the model for the rest of a dictation once it timed out or was unreachable, so a
+/// hung Ollama costs one timeout per dictation instead of one per sentence.
+public final class LLMCircuitBreaker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tripped = false
+
+    public init() {}
+
+    public var isOpen: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return tripped
+    }
+
+    /// Records a failed call. Only an unavailable model trips the breaker; a rejected answer
+    /// says nothing about the next sentence.
+    public func record(_ error: Error) {
+        guard let error = error as? LLMError, error == .timeout || error == .unreachable else { return }
+        lock.lock()
+        tripped = true
+        lock.unlock()
+    }
+}
+
 public enum LLMOutputGuard {
 
     public static func sanitize(_ output: String) -> String {
@@ -46,7 +70,7 @@ public enum LLMOutputGuard {
         let inputSet = Set(words(input))
         let outputWords = words(cleaned)
         guard !outputWords.isEmpty else { return nil }
-        let shared = outputWords.filter { word in inputSet.contains(word) || inputSet.contains { $0.hasPrefix(word) || word.hasPrefix($0) } }
+        let shared = outputWords.filter { word in inputSet.contains(word) || inputSet.contains { sharesStem($0, word) } }
         let share = Double(shared.count) / Double(outputWords.count)
         let minimumShare = style == .formal ? 0.6 : 0.75
         guard share >= minimumShare else { return nil }
@@ -55,6 +79,45 @@ public enum LLMOutputGuard {
         // output is (almost) purely made of input words, i.e. the model deleted and did not invent.
         let minimumRatio = share >= 0.9 ? 0.1 : 0.5
         guard ratio >= minimumRatio || abs(outputCount - inputCount) <= 3 else { return nil }
+        return cleaned
+    }
+
+    /// "komme"/"kommen" count as the same word. Short words must match exactly, otherwise "i" or
+    /// "d" would make almost any output word look like an input word.
+    static func sharesStem(_ a: String, _ b: String) -> Bool {
+        guard min(a.count, b.count) >= 3 else { return false }
+        return a.hasPrefix(b) || b.hasPrefix(a)
+    }
+
+    /// Lines a chat model puts in front of its answer ("Here is the more formal version:"). Only
+    /// phrases about "the text/version" count; "Gerne komme ich …" is a legitimate rewrite.
+    static let preambleMarkers = [
+        "here is", "here's", "revised", "rewritten", "version", "translation",
+        "hier ist", "hier die", "hier der", "überarbeitet", "umformuliert", "fassung", "übersetzung",
+    ]
+
+    static func isPreamble(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        return preambleMarkers.contains { lower.contains($0) }
+    }
+
+    /// Checks a rewrite of `selection`. Word overlap cannot be required here ("in English" changes
+    /// every word), so this catches what is clearly not a rewrite: a chat preamble with nothing
+    /// after it, an answer far longer than any rewrite, or the instruction echoed back.
+    public static func acceptRewrite(selection: String, instruction: String, output: String) -> String? {
+        var cleaned = sanitize(output)
+        // "Here is the more formal version:\n\nDear …" -> only the text after the preamble line.
+        let lines = cleaned.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
+        let selectionStart = selection.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+        if let first = lines.first, first.hasSuffix(":"), isPreamble(String(first)), !isPreamble(selectionStart) {
+            guard lines.count == 2 else { return nil }
+            cleaned = sanitize(String(lines[1]))
+        }
+        guard !cleaned.isEmpty else { return nil }
+        guard words(cleaned) != words(instruction) else { return nil }
+        let inputCount = max(1, wordCount(selection))
+        // "more formal" or "in more detail" may grow a text, but not into an essay.
+        guard wordCount(cleaned) <= inputCount * 3 + 30 else { return nil }
         return cleaned
     }
 

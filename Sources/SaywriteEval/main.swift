@@ -1,5 +1,8 @@
 // Quality evaluation of the text pipeline with the real local LLM.
 // Usage: swift run -c release SaywriteEval [Tests/Eval/cases.json] [--no-ai] [--verbose]
+//        [--model qwen2.5:3b] [--report Tests/Eval/results.jsonl]
+// --report appends one JSON line per run (date, set, model, result), so the quality claims in the
+// README have a history instead of a single number.
 // Each case is one dictation (one or more recognizer segments; a leading "+" marks a segment that
 // continues the previous one without a pause) and the expected final text ("||" separates variants).
 import Foundation
@@ -19,7 +22,8 @@ final class ScriptedTranscriber: Transcriber, @unchecked Sendable {
 }
 
 final class TimedLLM: LLMClient, @unchecked Sendable {
-    let inner = OllamaClient(configuration: .init())
+    let inner: OllamaClient
+    init(model: String) { inner = OllamaClient(configuration: .init(model: model)) }
     private let lock = NSLock()
     private(set) var latencies: [Double] = []
     private(set) var calls: [String] = []
@@ -44,11 +48,18 @@ final class TimedLLM: LLMClient, @unchecked Sendable {
 }
 
 let args = CommandLine.arguments.dropFirst()
-let path = args.first { !$0.hasPrefix("--") } ?? "Tests/Eval/cases.json"
+func option(_ name: String) -> String? {
+    guard let index = args.firstIndex(of: name), args.index(after: index) < args.endIndex else { return nil }
+    return args[args.index(after: index)]
+}
+let model = option("--model") ?? OllamaClient.Configuration().model
+let reportPath = option("--report")
+let optionValues = Set([option("--model"), reportPath].compactMap { $0 })
+let path = args.first { !$0.hasPrefix("--") && !optionValues.contains($0) } ?? "Tests/Eval/cases.json"
 let useAI = !args.contains("--no-ai")
 let verbose = args.contains("--verbose")
 let cases = try JSONDecoder().decode([EvalCase].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-let llm = TimedLLM()
+let llm = TimedLLM(model: model)
 if useAI { await llm.prewarm(forRewrite: false) }
 
 var passed = 0
@@ -76,4 +87,26 @@ print("PASS \(passed)/\(cases.count) (\(Int(Double(passed) / Double(cases.count)
 if !sorted.isEmpty {
     print(String(format: "LLM latency median %.2fs  p90 %.2fs  max %.2fs",
                  sorted[sorted.count / 2], sorted[Int(Double(sorted.count) * 0.9)], sorted.last!))
+}
+
+if let reportPath {
+    let entry: [String: Any] = [
+        "date": ISO8601DateFormatter().string(from: Date()),
+        "set": (path as NSString).lastPathComponent,
+        "model": useAI ? model : "none",
+        "passed": passed,
+        "total": cases.count,
+        "llmCalls": sorted.count,
+    ]
+    var line = try JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys])
+    line.append(0x0A)
+    let url = URL(fileURLWithPath: reportPath)
+    if let handle = try? FileHandle(forWritingTo: url) {
+        handle.seekToEndOfFile()
+        handle.write(line)
+        try handle.close()
+    } else {
+        try line.write(to: url)
+    }
+    print("Report appended to \(reportPath)")
 }

@@ -31,7 +31,7 @@ Most dictation apps run every sentence you say through a language model. That is
 - ⚡ **Text before you blink.** Saywrite transcribes and cleans up *while you are still talking*. When you tap the key to stop, the work is basically done: typically **about a quarter of a second from stop to text**, including AI corrections.
 - 🎯 **AI only where it is needed.** Every dictation gets instant, deterministic cleanup: filler words, stutters, capitalization, punctuation and spoken commands. The language model only sees the **sentence** that needs it (plus the one before, when you correct yourself across a pause). Everything else stays exactly as you said it.
 - 👀 **You always know what changed.** After every dictation the panel shows a summary like `2 filler words · AI: 1 correction`, and one click on **↩ Original** swaps in the version without AI.
-- 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model runs locally through Ollama. Nothing leaves your Mac, and there is no telemetry.
+- 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model runs locally through Ollama. With the default Ollama address nothing leaves your Mac, and there is no telemetry. If you point Saywrite at an Ollama server elsewhere, the settings warn you that your dictations go there.
 - 🪶 **Light on memory.** Built for an 8 GB MacBook. The speech model lives on the Neural Engine, and the LLM is loaded when you start dictating and released after 15 idle minutes.
 - 🌍 **English and German**, with automatic language detection. The speech model understands 25 European languages.
 
@@ -51,8 +51,8 @@ Most dictation apps run every sentence you say through a language model. That is
 | **Dictionary** | Names and terms are always written your way ("git hub" → "GitHub"). Applied as a rule, never guessed. |
 | **Spoken commands** | comma, question mark, exclamation mark, colon, semicolon, open/close quote, open/close paren, new line, new paragraph. The German equivalents work too. |
 | **Knows what to leave alone** | "The comma is missing", "a new line of credit", "I think that that is right", e-mail addresses, URLs and abbreviations like "e.g." stay exactly as spoken. |
-| **Safe AI** | A guard rejects model output that answers your question instead of transcribing it, invents text, or loses a number you corrected to. You then get the rule-cleaned version. |
-| **Never loses a word** | If Ollama is down or slow, the rules-only text is inserted. Password fields are detected, "Nothing heard" and a silent microphone are reported, and your recent dictations are kept in the history. |
+| **Safe AI** | A guard rejects model output that answers your question instead of transcribing it, invents text, or loses a number you corrected to. You then get the rule-cleaned version. Rewrites are checked too: a chat preamble is stripped, and an essay or an echoed instruction leaves your text unchanged. If Ollama times out once, the rest of that dictation goes without AI instead of waiting again for every sentence. |
+| **Never loses a word** | If Ollama is down or slow, the rules-only text is inserted. If you switch to another app while the text is being prepared, it is copied instead of landing in the wrong window. "Nothing heard" and a silent microphone are reported, and your recent dictations are kept in the history (readable by your user only). Password fields are detected: nothing is inserted there, and that dictation is not saved. |
 | **Your microphone** | Pick any input device. Switching to AirPods mid-dictation is handled. |
 | **Hands-free safety** | A forgotten recording stops by itself after 60 s of silence. |
 
@@ -68,7 +68,7 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 | Two sentences with a correction (8 s) | – | 0.24 s |
 | Four sentences with pauses (17 s) | 0.09–0.13 s | – |
 
-**Text quality** (`make eval`, the recognizer output of realistic dictations run through the full pipeline with the local LLM):
+**Text quality** (`make eval`, realistic recognizer output typed into the eval sets and run through the full pipeline with the local LLM; the speech model itself is not part of this measurement):
 
 | Test set | Cases | Exactly right |
 |---|---|---|
@@ -76,6 +76,8 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 | German | 107 | ~90 % |
 
 The sets cover everyday messages, e-mails, self-corrections of many shapes, sentences that must not change, numbers, dates, URLs, math, spoken commands and all three styles.
+
+Take these numbers as a development benchmark, not an independent result: the rules and prompts were tuned while these sets were written, so they flatter the pipeline. For an honest number, add cases from real dictations to a separate file (for example `Tests/Eval/holdout.json`) and never adjust rules against it. `--report Tests/Eval/results.jsonl` appends each run (date, set, model, result) so changes show up over time.
 
 ## How it works
 
@@ -99,7 +101,7 @@ flowchart LR
 3. **The language is detected** from the recognized words (English or German), and **deterministic rules** for that language clean every piece instantly.
 4. **A gate** decides per sentence whether the model is needed at all. Most sentences never reach it.
 5. **An output guard** checks what the model returns: mostly your own words, a plausible length, and the corrected values still present. Anything else is thrown away.
-6. **The text is joined and pasted once**, so your cursor doesn't jump around, and your clipboard is restored afterwards (except for very large or lazily provided clipboard contents). Without a text field in front, the text is copied instead.
+6. **The text is joined and pasted once**, so your cursor doesn't jump around, and your clipboard is restored afterwards (except for very large or lazily provided clipboard contents, which then stay replaced by the dictation). Without a text field in front, or when another app came to the front meanwhile, the text is copied instead.
 
 ## Install
 
@@ -138,13 +140,14 @@ Everything else is in the menu bar icon → **Settings**: keys, microphone, lang
 
 - **Bigger model for rewriting:** choose, for example, `qwen2.5:7b` under *Model (rewrite)* if you have the RAM. Dictation cleanup stays on the small, fast model.
 - **Less AI in an app:** set that app to *Casual*, which uses AI only for explicit self-corrections, or switch AI off entirely in the menu.
-- **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call.
+- **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call. The log contains your dictated text, so delete it when you are done.
 
 ## Development
 
 ```bash
 make test                   # unit tests for the text pipeline
 make eval                   # quality evaluation with the real local LLM (German set)
+swift run -c release SaywriteEval Tests/Eval/cases.json --model qwen2.5:7b --report Tests/Eval/results.jsonl
 swift run -c release SaywriteEval Tests/Eval/cases-en.json   # English set
 make run                    # build the .app and launch it
 scripts/bench.sh            # latency benchmark with the real models, no microphone needed
@@ -152,8 +155,8 @@ scripts/bench.sh            # latency benchmark with the real models, no microph
 
 | Path | What lives there |
 |---|---|
-| `Sources/SaywriteCore` | Platform-independent logic: language detection, rules, gate, sentence splitter, dictionary, change summary, Ollama client and output guard, dictation session. Fully unit-tested. |
-| `Sources/Saywrite` | The macOS app: event-tap hotkeys, audio capture, VAD segmentation, Parakeet, text insertion, recorder panel, sounds, settings. |
+| `Sources/SaywriteCore` | Platform-independent logic: language detection, rules, gate, sentence splitter, dictionary, change summary, Ollama client and output guards, dictation session, the tap-or-hold hotkey logic and the paste-target rules. Fully unit-tested. |
+| `Sources/Saywrite` | The macOS app: event tap, audio capture, VAD segmentation, Parakeet, text insertion (Accessibility queries run off the main thread, which also serves the event tap), recorder panel, sounds, settings. Not unit-tested; CI builds it. |
 | `Sources/SaywriteEval` | The quality evaluation runner. Cases live in `Tests/Eval`. |
 | `docs/superpowers/specs` | The design document and the decisions made while building it. |
 

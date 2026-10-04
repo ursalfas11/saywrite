@@ -72,6 +72,7 @@ public actor DictationSession {
     /// "de", "en" or "auto" (detected per segment from the recognized words).
     private let languageSetting: String
     private let replacements: [Replacement]
+    private let breaker = LLMCircuitBreaker()
 
     /// `llm == nil` means AI cleanup is switched off (not an error).
     public init(
@@ -99,6 +100,7 @@ public actor DictationSession {
         let llm = self.llm
         let style = self.style
         let languageSetting = self.languageSetting
+        let breaker = self.breaker
         let index = tasks.count
         let task = Task<SegmentResult, Never> { [weak self] in
             let raw: String
@@ -110,7 +112,7 @@ public actor DictationSession {
             // Wait for the previous segment so LLM calls run one after another.
             _ = await previous?.value
             let language = DictationLanguage.resolve(setting: languageSetting, text: raw)
-            var result = await Self.process(raw: raw, style: style, llm: llm, language: language)
+            var result = await Self.process(raw: raw, style: style, llm: llm, language: language, breaker: breaker)
             result.language = language
             result.continuesPrevious = continuesPrevious
             await self?.record(result, at: index)
@@ -136,7 +138,10 @@ public actor DictationSession {
     /// Whether a queued segment is still being transcribed or cleaned.
     public var hasPendingSegments: Bool { completed.count < tasks.count }
 
-    static func process(raw: String, style: Style, llm: LLMClient?, language: DictationLanguage = .german) async -> SegmentResult {
+    static func process(
+        raw: String, style: Style, llm: LLMClient?, language: DictationLanguage = .german,
+        breaker: LLMCircuitBreaker = LLMCircuitBreaker()
+    ) async -> SegmentResult {
         guard !raw.isEmpty else { return SegmentResult(raw: "", units: [], usedLLM: false, llmFailed: false) }
         let ruled = RuleCleaner.clean(raw, language: language)
         guard !ruled.isEmpty else { return SegmentResult(raw: raw, units: [], usedLLM: false, llmFailed: false) }
@@ -159,6 +164,7 @@ public actor DictationSession {
                 }
                 let combined = Self.joinForCorrection(previous, unit)
                 do {
+                    guard !breaker.isOpen else { throw LLMError.unreachable }
                     let improved = try await llm.cleanup(text: combined, style: style, language: language)
                     Debug.log("llm (with previous sentence): \(combined) -> \(improved)")
                     // Returning only the discarded sentence means the model misunderstood.
@@ -170,6 +176,7 @@ public actor DictationSession {
                     usedLLM = true
                 } catch {
                     Debug.log("llm failed: \(error)")
+                    breaker.record(error)
                     llmFailed = true
                     output.append(contentsOf: [previous, unit])
                     attemptedCorrections.insert(unit)
@@ -187,6 +194,7 @@ public actor DictationSession {
                 continue
             }
             do {
+                guard !breaker.isOpen else { throw LLMError.unreachable }
                 let improved = try await llm.cleanup(text: unit, style: style, language: language)
                 Debug.log("llm: \(unit) -> \(improved)")
                 // Without a correction the model may only add punctuation; changed words fall back.
@@ -198,6 +206,7 @@ public actor DictationSession {
                 usedLLM = true
             } catch {
                 Debug.log("llm failed: \(error)")
+                breaker.record(error)
                 llmFailed = true
                 output.append(unit)
             }
@@ -246,6 +255,7 @@ public actor DictationSession {
             }
             let combined = Self.joinForCorrection(units[index - 1], units[index])
             do {
+                guard !breaker.isOpen else { throw LLMError.unreachable }
                 let improved = try await llm.cleanup(text: combined, style: style, language: language)
                 Debug.log("llm (across pause): \(combined) -> \(improved)")
                 guard !LLMOutputGuard.sameWords(improved, units[index - 1]),
@@ -257,6 +267,7 @@ public actor DictationSession {
                 usedLLM = true
             } catch {
                 Debug.log("llm failed: \(error)")
+                breaker.record(error)
                 llmFailed = true
                 index += 1
             }

@@ -51,6 +51,8 @@ public final class HistoryStore: @unchecked Sendable {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try JSONEncoder.history.encode(items)
             try data.write(to: fileURL, options: .atomic)
+            // Dictations can be private: readable by this user only.
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         } catch {
             // History is a convenience; failing to save must never break dictation.
         }

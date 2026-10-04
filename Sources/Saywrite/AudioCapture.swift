@@ -58,7 +58,7 @@ final class AudioCapture: @unchecked Sendable {
 
     /// Called on the audio thread. Guarded by `lock` so it can be swapped while audio is running.
     private var sampleHandler: (([Float]) -> Void)?
-    /// Normalized 0...1 loudness for the overlay meter.
+    /// Normalized 0...1 loudness for the overlay meter. Set once before the first recording.
     var onLevel: ((Float) -> Void)?
     /// The input device went away mid-recording and no replacement could be started.
     var onDeviceLost: (() -> Void)?
@@ -66,7 +66,6 @@ final class AudioCapture: @unchecked Sendable {
     private var engine = AVAudioEngine()
     private let lock = NSLock()
     private var samples: [Float] = []
-    private var converter: AVAudioConverter?
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: AudioCapture.sampleRate, channels: 1, interleaved: false)!
     private(set) var isRunning = false
@@ -118,10 +117,15 @@ final class AudioCapture: @unchecked Sendable {
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw NSError(domain: "Saywrite", code: 1, userInfo: [NSLocalizedDescriptionKey: "Kein Mikrofon gefunden"])
         }
-        converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+        // Each tap owns its converter: after a device change the old engine may still deliver a
+        // buffer in the old format while the new one starts, so a shared converter would be raced
+        // and fed the wrong format.
+        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+            throw NSError(domain: "Saywrite", code: 2, userInfo: [NSLocalizedDescriptionKey: "Audioformat nicht unterstützt"])
+        }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
-            self?.process(buffer)
+            self?.process(buffer, converter: converter)
         }
         engine.prepare()
         try engine.start()
@@ -142,8 +146,7 @@ final class AudioCapture: @unchecked Sendable {
         return samples
     }
 
-    private func process(_ buffer: AVAudioPCMBuffer) {
-        guard let converter else { return }
+    private func process(_ buffer: AVAudioPCMBuffer, converter: AVAudioConverter) {
         let ratio = targetFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
         guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }

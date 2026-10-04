@@ -78,9 +78,11 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
             maxTokens: max(512, selection.count),
             timeout: configuration.rewriteTimeout
         )
-        let cleaned = LLMOutputGuard.sanitize(output)
-        guard !cleaned.isEmpty else { throw LLMError.badResponse }
-        return cleaned
+        guard !LLMOutputGuard.sanitize(output).isEmpty else { throw LLMError.badResponse }
+        guard let accepted = LLMOutputGuard.acceptRewrite(selection: selection, instruction: instruction, output: output) else {
+            throw LLMError.rejectedOutput
+        }
+        return accepted
     }
 
     // MARK: - Status
@@ -145,6 +147,20 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
             guard http.statusCode == 200 else { throw LLMError.http(http.statusCode) }
             return data
         }
+    }
+}
+
+public extension OllamaClient.Configuration {
+    /// True when the server runs on this Mac. Any other address receives every dictation (and
+    /// selected text for rewriting), over plain HTTP unless it is an https URL.
+    var isLocal: Bool { Self.isLocal(baseURL) }
+
+    static func isLocal(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        if host == "localhost" || host == "::1" || host == "[::1]" { return true }
+        // 127.0.0.0/8, but not a host name like "127.example.com".
+        let parts = host.split(separator: ".")
+        return parts.count == 4 && parts[0] == "127" && parts.allSatisfy { UInt8($0) != nil }
     }
 }
 

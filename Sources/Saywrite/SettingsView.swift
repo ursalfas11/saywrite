@@ -154,6 +154,17 @@ private struct GeneralTab: View {
         ("pl", L("Polish", "Polnisch")), ("pt", L("Portuguese", "Portugiesisch")),
     ]
 
+    /// Shown when the Ollama address points away from this Mac, where dictations would go.
+    private var remoteOllamaWarning: String? {
+        guard !settings.ollamaConfiguration.isLocal else { return nil }
+        if settings.ollamaURL.lowercased().hasPrefix("https://") {
+            return L("This address is not on this Mac: every dictation and selected text for rewriting is sent there.",
+                     "Diese Adresse liegt nicht auf diesem Mac: jedes Diktat und markierter Text zum Umformulieren gehen dorthin.")
+        }
+        return L("This address is not on this Mac: every dictation and selected text for rewriting is sent there unencrypted.",
+                 "Diese Adresse liegt nicht auf diesem Mac: jedes Diktat und markierter Text zum Umformulieren gehen unverschlüsselt dorthin.")
+    }
+
     var body: some View {
         Form {
             Section(L("Keys", "Tasten")) {
@@ -181,6 +192,9 @@ private struct GeneralTab: View {
                 ModelField(title: L("Model (cleanup)", "Modell (Aufräumen)"), value: $settings.ollamaModel, models: state.installedModels)
                 ModelField(title: L("Model (rewrite)", "Modell (Umformulieren)"), value: $settings.rewriteModel, models: state.installedModels, allowSame: true)
                 TextField(L("Ollama address", "Ollama-Adresse"), text: $settings.ollamaURL)
+                if let warning = remoteOllamaWarning {
+                    Text(warning).font(.caption).foregroundStyle(.orange)
+                }
                 Stepper(L("AI time limit: \(Int(settings.llmTimeout)) s", "KI-Zeitlimit: \(Int(settings.llmTimeout)) s"), value: $settings.llmTimeout, in: 3...30)
             }
             Section {

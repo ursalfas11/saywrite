@@ -410,7 +410,7 @@ final class DictationController {
         overlay.model.partialText = ""
         let hasOriginal = result.withoutAI != nil
         if hasOriginal { undoCandidate = result }
-        let outcome = await TextInserter.insert(result.final, onPasted: { [weak self] in
+        let outcome = await TextInserter.insert(result.final, expectedApp: sessionApp, onPasted: { [weak self] in
             // Sound and panel react the moment the text lands, not after the clipboard restore.
             guard let self else { return }
             if self.settings.playSounds { self.sounds.playStop() }
@@ -419,15 +419,22 @@ final class DictationController {
             self.overlay.show(.done(result.summary.text, undo: undo))
             self.readyForNext(id)
         })
-        history.append(result)
-        state.history = history.items
+        // Something dictated into a password field is not written to the history file.
+        if outcome != .secureField {
+            history.append(result)
+            state.history = history.items
+        }
         switch outcome {
         case .pasted:
             break
         case .copiedToClipboard:
             overlay.show(.done(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), undo: false))
+        case .appChanged:
+            undoCandidate = nil
+            overlay.show(.done(Self.appChangedMessage, undo: false))
         case .secureField:
-            showError(L("Password field – not inserted. The text is in the history.", "Passwortfeld – nicht eingefügt. Der Text steht im Verlauf."), action: nil)
+            undoCandidate = nil
+            showError(L("Password field – not inserted and not saved", "Passwortfeld – nicht eingefügt und nicht gespeichert"), action: nil)
         }
     }
 
@@ -446,9 +453,9 @@ final class DictationController {
         TextInserter.undo()
         Task {
             try? await Task.sleep(nanoseconds: 120_000_000)
-            switch await TextInserter.insert(original) {
+            switch await TextInserter.insert(original, expectedApp: result.appBundleID) {
             case .pasted: overlay.show(.done(L("Original inserted", "Original eingefügt"), undo: false))
-            case .copiedToClipboard: overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
+            case .copiedToClipboard, .appChanged: overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
         }
@@ -476,7 +483,7 @@ final class DictationController {
             overlay.model.committedText = instruction
             overlay.model.partialText = ""
             let rewritten = try await llm.rewrite(selection: selection, instruction: instruction)
-            let outcome = await TextInserter.insert(rewritten, onPasted: { [weak self] in
+            let outcome = await TextInserter.insert(rewritten, expectedApp: app, onPasted: { [weak self] in
                 guard let self else { return }
                 if self.settings.playSounds { self.sounds.playStop() }
                 self.overlay.show(.done(L("Rewritten", "Umformuliert"), undo: false))
@@ -486,16 +493,25 @@ final class DictationController {
             let result = DictationResult(
                 raw: "[\(instruction)] \(selection)", final: rewritten, style: .neutral,
                 appBundleID: app, summary: summary, latency: 0)
-            history.append(result)
-            state.history = history.items
+            if outcome != .secureField {
+                history.append(result)
+                state.history = history.items
+            }
             switch outcome {
             case .pasted: break
             case .copiedToClipboard: overlay.show(.done(L("Rewritten – copied, press ⌘V", "Umformuliert – kopiert, ⌘V drücken"), undo: false))
+            case .appChanged: overlay.show(.done(Self.appChangedMessage, undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
+        } catch LLMError.rejectedOutput {
+            showError(L("AI answer did not look like a rewrite – text unchanged", "KI-Antwort war keine Umformulierung – Text unverändert"), action: nil)
         } catch {
             showError(L("AI not reachable – text unchanged", "KI nicht erreichbar – Text unverändert"), action: nil)
         }
+    }
+
+    private static var appChangedMessage: String {
+        L("Other app in front – copied, press ⌘V", "Andere App im Vordergrund – kopiert, ⌘V drücken")
     }
 
     private func teardown() {
@@ -528,7 +544,7 @@ final class DictationController {
             try? await Task.sleep(nanoseconds: 250_000_000)
             switch await TextInserter.insert(last.final) {
             case .pasted: break
-            case .copiedToClipboard: overlay.show(.done(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), undo: false))
+            case .copiedToClipboard, .appChanged: overlay.show(.done(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
         }
