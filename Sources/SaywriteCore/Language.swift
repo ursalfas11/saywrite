@@ -26,7 +26,22 @@ public enum DictationLanguage: String, CaseIterable, Sendable {
         }
     }
 
-    nonisolated(unsafe) public static var lastDetected: DictationLanguage?
+    /// Written by the session's segment tasks, read on the main thread when priming the model.
+    public static var lastDetected: DictationLanguage? {
+        get {
+            lastDetectedLock.lock()
+            defer { lastDetectedLock.unlock() }
+            return lastDetectedValue
+        }
+        set {
+            lastDetectedLock.lock()
+            lastDetectedValue = newValue
+            lastDetectedLock.unlock()
+        }
+    }
+
+    private static let lastDetectedLock = NSLock()
+    nonisolated(unsafe) private static var lastDetectedValue: DictationLanguage?
 
     static let germanMarkers: Set<String> = [
         "und", "der", "die", "das", "ich", "nicht", "ist", "ein", "eine", "zu", "mit", "wir", "du", "sie", "es",
