@@ -454,6 +454,7 @@ final class DictationController {
 
     private func appendToHistory(_ result: DictationResult) {
         guard settings.keepHistory else { return }
+        history.removeOlder(than: Self.historyRetention)
         history.append(result)
         state.history = history.items
     }
@@ -573,7 +574,10 @@ final class DictationController {
 
     /// Paste the most recent dictation again at the cursor.
     func pasteLast() {
-        guard let last = history.items.first else { return }
+        guard let last = history.items.first else {
+            overlay.show(.done(L("Nothing to paste (history empty or off)", "Nichts einzufügen (Verlauf leer oder aus)"), undo: false))
+            return
+        }
         // Not while a dictation is recording or being inserted: it would paste in between and mix up
         // the clipboard handling of that session.
         guard case .idle = phase else {

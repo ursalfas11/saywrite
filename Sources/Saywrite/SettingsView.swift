@@ -210,6 +210,8 @@ private struct GeneralTab: View {
             Section {
                 Toggle(L("Launch at login", "Beim Anmelden starten"), isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
+                        // Also fires when refreshSystemState() syncs the toggle; nothing to do then.
+                        guard (SMAppService.mainApp.status == .enabled) != enabled else { return }
                         do {
                             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
                         } catch {

@@ -35,11 +35,11 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
 
     /// A session that follows redirects only within the same host: a remote server must not be able
     /// to send the dictation POST on to somewhere else.
-    public static func makeSession() -> URLSession {
-        URLSession(configuration: .ephemeral, delegate: SameHostRedirects(), delegateQueue: nil)
-    }
+    /// One session for the whole process: clients are created often, and a URLSession holds on to its
+    /// delegate and connections until it is invalidated.
+    public static let sharedSession = URLSession(configuration: .ephemeral, delegate: SameHostRedirects(), delegateQueue: nil)
 
-    public init(configuration: Configuration, session: URLSession = OllamaClient.makeSession()) {
+    public init(configuration: Configuration, session: URLSession = OllamaClient.sharedSession) {
         self.configuration = configuration
         self.session = session
     }

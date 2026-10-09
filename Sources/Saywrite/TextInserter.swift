@@ -3,6 +3,7 @@ import SaywriteCore
 import ApplicationServices
 import AVFoundation
 import Carbon
+import os
 
 enum InsertOutcome {
     case pasted
@@ -52,18 +53,34 @@ enum TextInserter {
 
     /// Whether the focused element is a password field, for a check before the dictation is processed.
     static func focusIsSecureField() async -> Bool {
-        await Task.detached { focusedElement().map(isSecureField) == true }.value
+        let app = NSWorkspace.shared.frontmostApplication
+        let electron = app.map(isElectron) ?? false
+        let bundleID = app?.bundleIdentifier ?? ""
+        let pid = app?.processIdentifier ?? 0
+        return await Task.detached {
+            // Switch the tree on early so it has built by the time the user stops speaking.
+            enableManualAccessibility(bundleID: bundleID, pid: pid, isElectron: electron)
+            return focusedElement().map(isSecureField) == true
+        }.value
+    }
+
+    private nonisolated static let manualAXPids = OSAllocatedUnfairLock(initialState: Set<pid_t>())
+
+    /// Ask Chromium/Electron to build their accessibility tree, once per process: keeping the tree on
+    /// makes those apps slower, so it is not repeated on every paste.
+    private nonisolated static func enableManualAccessibility(bundleID: String, pid: pid_t, isElectron: Bool) {
+        guard pid != 0, PasteTargetRules.shouldEnableManualAccessibility(bundleID: bundleID, isElectron: isElectron),
+              manualAXPids.withLock({ $0.insert(pid).inserted }) else { return }
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.3)
+        AXUIElementSetAttributeValue(application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     }
 
     /// Everything insert() needs to know from Accessibility, gathered on a background thread.
     private nonisolated static func probe(bundleID: String, pid: pid_t, isElectron: Bool) -> Probe {
         // Chromium and Electron build their accessibility tree only on request; without it a
         // password field there looks like no field at all.
-        if PasteTargetRules.shouldEnableManualAccessibility(bundleID: bundleID, isElectron: isElectron) {
-            let application = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(application, 0.3)
-            AXUIElementSetAttributeValue(application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        }
+        enableManualAccessibility(bundleID: bundleID, pid: pid, isElectron: isElectron)
         let element = focusedElement()
         let elementIsSecure = element.map(isSecureField) == true
         let secureInput = IsSecureEventInputEnabled()
