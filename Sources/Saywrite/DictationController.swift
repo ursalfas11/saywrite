@@ -187,37 +187,37 @@ final class DictationController {
         let store = modelStore
         let start = store.partialBytes(spec)
         state.builtinState = .downloading(Double(start) / Double(spec.size))
-        downloadTask = Task { [weak self] in
+        downloadTask = Task {
             do {
                 let url = try await ModelDownloader(spec: spec, store: store).run { phase in
-                    Task { @MainActor [weak self] in
-                        switch phase {
-                        case .downloading(let progress):
-                            if case .downloading = self?.state.builtinState { self?.state.builtinState = .downloading(progress.fraction) }
-                        case .verifying:
-                            self?.state.builtinState = .verifying
-                        }
-                    }
+                    Task { @MainActor in self.applyDownload(phase) }
                 }
-                guard let self else { return }
                 // Load the model once now: the first run on a Mac compiles the Metal kernels, which
                 // would otherwise delay the first dictation.
-                self.state.builtinState = .optimizing
-                await LlamaEngine.shared.prewarm(modelURL: url, language: self.prewarmLanguage, forRewrite: false)
-                self.state.builtinState = LlamaEngine.shared.isLoaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
+                state.builtinState = .optimizing
+                await LlamaEngine.shared.prewarm(modelURL: url, language: prewarmLanguage, forRewrite: false)
+                state.builtinState = LlamaEngine.shared.isLoaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
             } catch is CancellationError {
-                self?.state.builtinState = .initial(for: store.status(spec))
+                state.builtinState = .initial(for: store.status(spec))
             } catch {
                 Debug.log("model download failed: \(error)")
-                let partial = store.status(spec)
-                // An interrupted connection leaves the partial file: show it as paused, with the reason.
-                if case .partial = partial, (error as? ModelDownloadError) == .incomplete {
-                    self?.state.builtinState = .failed(L("Download interrupted – continue to resume", "Download unterbrochen – Fortsetzen macht weiter"))
+                // An interrupted connection leaves the partial file: say so, the button continues it.
+                if (error as? ModelDownloadError) == .incomplete {
+                    state.builtinState = .failed(L("Download interrupted – continue to resume", "Download unterbrochen – Fortsetzen macht weiter"))
                 } else {
-                    self?.state.builtinState = .failed(error.localizedDescription)
+                    state.builtinState = .failed(error.localizedDescription)
                 }
             }
-            self?.downloadTask = nil
+            downloadTask = nil
+        }
+    }
+
+    private func applyDownload(_ phase: ModelDownloader.Phase) {
+        switch phase {
+        case .downloading(let progress):
+            if case .downloading = state.builtinState { state.builtinState = .downloading(progress.fraction) }
+        case .verifying:
+            if state.builtinState.isBusy { state.builtinState = .verifying }
         }
     }
 

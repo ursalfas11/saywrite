@@ -35,7 +35,12 @@ enum SelfTest {
             print(String(format: "models loaded in %.2fs (vad: %@)", Date().timeIntervalSince(loadStart), vad == nil ? "off" : "on"))
 
             let samples = try AudioConverter().resampleAudioFile(url)
-            let llm: LLMClient? = !useAI ? nil : (backend == .builtin ? LlamaClient(modelURL: modelURL) : OllamaClient(configuration: .init()))
+            let llm: LLMClient?
+            switch (useAI, backend) {
+            case (false, _): llm = nil
+            case (true, .builtin): llm = LlamaClient(modelURL: modelURL)
+            case (true, .ollama): llm = OllamaClient(configuration: .init())
+            }
             if useAI { print("AI backend: \(backend.rawValue)") }
             if let llm { await llm.prewarm(forRewrite: false) }
 
