@@ -50,7 +50,9 @@ public enum CleanupGate {
         #",\s*quatsch\s*,"#,
         #",\s*(?:sorry|pardon|entschuldigung)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)"#,
         // "um 5 nein um 6" without commas
-        #"\b(?:um|am|an|bis|ab|in|im)\s+\S+\s+(?:nein|nee)\s+(?:um|am|an|bis|ab|in|im)\b"#,
+        #"\b(?:um|am|an|bis|ab|in|im)\s+\S+(?:\s+\S+)?\s+(?:nein|nee)\s+(?:um|am|an|bis|ab|in|im)\b"#,
+        // "12,99 Euro, nein 13,99 Euro": a number follows the marker, the comma after it is missing.
+        #"\d[^.!?]*,\s*(?:nein|nee)\s+\d"#,
         #"\bvergiss (?:das|es)\s*[,.!]"#,
         #"\b(?:streich|lösch) das\s*[,.!]"#,
         #"\bkorrektur\s*:"#,
@@ -166,7 +168,8 @@ public enum CleanupGate {
         #"\b(a|an|the|my|our|your|their)\s+[^.!?,]{1,40}?,\s*(?:or\s+)?no\s*,\s*\1\s+\S"#,
         englishAfterOpener + #",\s*wait\s*,\s*(?!(?:i|you|we|it|that|this|he|she|they|what|let|please|just|hold|okay|ok|maybe|so|now)\b)\S"#,
         #",\s*(?:sorry|pardon)\s*,\s*(?:at|on|in|to|for|by|from|\d)"#,
-        #"\b(?:at|on|in|by|from)\s+\S+\s+no\s+(?:at|on|in|by|from)\b"#,
+        #"\b(?:at|on|in|by|from)\s+\S+(?:\s+\S+)?\s+no\s+(?:at|on|in|by|from)\b"#,
+        #"\d[^.!?]*,\s*no\s+\d"#,
         #"\bscratch that\b"#,
         #"\bnever mind\s*[,.!]"#,
         #"\bforget (?:that|it)\s*[,.!]"#,
@@ -280,7 +283,15 @@ public enum CleanupGate {
         let namePattern = language == .english
             ? #",\s*(?i:sorry|i mean|actually|no)\s*,?\s*\p{Lu}\p{Ll}+[.!?]?$"#
             : #",\s*(?i:sorry|ich meine|nein|nee)\s*,?\s*\p{Lu}\p{Ll}+[.!?]?$"#
-        return text.range(of: namePattern, options: .regularExpression) != nil
+        guard let match = text.range(of: namePattern, options: .regularExpression) else { return false }
+        // "Ich sagte, nein, Danke": a refusal, not a correction. The quotation verb in the same
+        // sentence and the polite words after "nein" rule it out, as for the other patterns.
+        let sentence = text[..<match.lowerBound].split(omittingEmptySubsequences: false, whereSeparator: { ".!?".contains($0) }).last ?? ""
+        let verbs = language == .english ? englishQuoteVerbs : quoteVerbs
+        if sentence.lowercased().range(of: #"\b"# + verbs + #"\b"#, options: .regularExpression) != nil { return false }
+        let name = String(text[match].lowercased().split(whereSeparator: { !$0.isLetter }).last ?? "")
+        let polite: Set<String> = ["danke", "bitte", "thanks", "thank", "please"]
+        return !polite.contains(name)
     }
 
     static func longestRunWithoutPunctuation(_ text: String) -> Int {
