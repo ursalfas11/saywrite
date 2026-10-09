@@ -49,7 +49,7 @@ public enum CleanupGate {
         // "… Moment, ich rufe dich lieber an": a clause is a correction when it says "rather".
         #",\s*(?:moment|warte)\s*,\s*(?:ich|es|wir)\b(?=[^.!?]*\b(?:lieber|doch|eher|stattdessen|besser)\b)\S"#,
         #",\s*quatsch\s*,"#,
-        #",\s*(?:sorry|pardon|entschuldigung)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)"#,
+        #",\s*(?:sorry|pardon|entschuldigung)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)(?![\p{L}])"#,
         // "um 5 nein um 6" without commas
         #"\b(?:um|am|an|bis|ab|in|im)\s+\S+(?:\s+\S+)?\s+(?:nein|nee)\s+(?:um|am|an|bis|ab|in|im)\b"#,
         // "12,99 Euro, nein 13,99 Euro": a number follows the marker, the comma after it is missing.
@@ -75,8 +75,8 @@ public enum CleanupGate {
         // a preposition or number ("Ich meine am Dienstag") or a bare fragment ("Ich meine Paul")
         // counts. A full sentence needs `correctsPrevious` to repeat the sentence before.
         #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?ich meine\s*,?\s*(?:(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)\b|"# + germanBareFragment + #")"#,
-        #"^(?:sorry|entschuldigung|pardon)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)"#,
-        #"^(?:warte|moment)(?!\s+mal)\s*,\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|nein|nee|\d)"#,
+        #"^(?:sorry|entschuldigung|pardon)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)(?![\p{L}])"#,
+        #"^(?:warte|moment)(?!\s+mal)\s*,\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|nein|nee|\d)(?![\p{L}])"#,
         #"^(?:warte|moment)(?!\s+mal)\s*,\s*(?:ich|es|wir)\b(?=[^.!?]*\b(?:lieber|doch|eher|stattdessen|besser)\b)"#,
         #"^(?:quatsch|korrektur)\b\s*[,:!]"#,
     ]
@@ -162,18 +162,18 @@ public enum CleanupGate {
         #",\s*i mean\b(?!\s*,?\s*(?:it|that|this|we|i|you|they|he|she|seriously|honestly|really|come on)\b)"#,
         #"[\p{L}\p{N}]\s+i mean\s*,\s*(?!(?:it|that|this|seriously|honestly|really|come on)\b)\S"#,
         #",\s*or rather\b"#,
-        #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
+        #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)(?![\p{L}])"#,
         // "Let's meet Monday, make that Tuesday": any word, but not "make it work" / "make it clear".
         #",\s*make (?:that|it)\s+(?!(?:work|clear|happen|right|better|easy|easier|possible|so|up|a|an|the|simple|quick|quicker|fast|faster|short|shorter|good|nice|sure|count|real|official|known|obvious|perfect|look|sound|feel|more|less|my|our|your|their|his|her|its|this|that|it|there|to|out|through|clearer|worse|safe|happen)\b)\S"#,
         // "I want the red one, no, the blue one": the determiner comes back, so "no," repeats the phrase.
         #"\b(a|an|the|my|our|your|their)\s+[^.!?,]{1,40}?,\s*(?:or\s+)?no\s*,\s*\1\s+\S"#,
         englishAfterOpener + #",\s*wait\s*,\s*(?!(?:i|you|we|it|that|this|he|she|they|what|let|please|just|hold|okay|ok|maybe|so|now)\b)\S"#,
-        #",\s*(?:sorry|pardon)\s*,\s*(?:at|on|in|to|for|by|from|\d)"#,
+        #",\s*(?:sorry|pardon)\s*,\s*(?:at|on|in|to|for|by|from|\d)(?![\p{L}])"#,
         #"\b(?:at|on|in|by|from)\s+\S+(?:\s+\S+)?\s+no\s+(?:at|on|in|by|from)\b"#,
         #"\d[^.!?]*,\s*no\s+\d"#,
         #"\bscratch that\b"#,
         #"\bnever mind\s*[,.!]"#,
-        #"\bforget (?:that|it)\s*[,.!]"#,
+        #"(?<!n't )(?<!n’t )(?<!\bnot )(?<!\bnever )\bforget (?:that|it)\s*[,.!]"#,
         #"\bcorrection\s*:"#,
     ]
 
@@ -188,8 +188,8 @@ public enum CleanupGate {
         // sentence needs `correctsPrevious` to repeat the sentence before.
         #"^(?:sorry\s*,?\s+)?i mean\s*,?\s*"# + englishIdioms + #"(?:(?:at|on|in|to|for|by|from)\b|\d|"# + englishBareFragment + #")"#,
         #"^sorry\s*,?\s+i mean\b(?!\s*,?\s*(?:that|it|this|i|we|you)\b)\s*,?\s*[\p{L}\p{N}]"#,
-        #"^(?:sorry|actually)\s*,\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
-        #"^wait\s*,\s*(?:at|on|in|to|for|by|from|no|\d)"#,
+        #"^(?:sorry|actually)\s*,\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)(?![\p{L}])"#,
+        #"^wait\s*,\s*(?:at|on|in|to|for|by|from|no|\d)(?![\p{L}])"#,
     ]
 
     static let englishBareNo = #"^no\b\s*,?\s*(?:at|on|in|to|for|by|from|rather|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b"#
@@ -231,6 +231,18 @@ public enum CleanupGate {
         let head = correctionWords(String(text.lowercased().dropLast(tail.count)))
         return correctedWords(in: text, language: language).filter { word in
             !head.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
+        }
+    }
+
+    /// The last word of the version before the marker that the corrected version does not repeat
+    /// ("morgen" in "Morgen früh, nein, übermorgen früh"): the old value. An answer that still has it
+    /// but not the new version's first word kept the old value. Only the last such word counts: earlier
+    /// ones may be reworded by a good answer ("möchte" -> "will").
+    public static func replacedWord(in text: String, language: DictationLanguage) -> String? {
+        guard let tail = correctedTail(in: text, language: language) else { return nil }
+        let tailWords = correctionWords(String(tail))
+        return correctionWords(String(text.lowercased().dropLast(tail.count))).last { word in
+            !tailWords.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
         }
     }
 

@@ -324,6 +324,12 @@ public actor DictationSession {
             }
         }
         guard changed.isEmpty || changed.contains(where: survives) else { return false }
+        // The new value comes first after the marker. When it is gone while a word of the old version is
+        // still there ("Morgen früh, nein, übermorgen früh geht es weiter" -> "Morgen früh geht es
+        // weiter"), a trailing word that happens to survive must not vouch for the answer.
+        if let first = changed.first, !survives(first),
+           let old = CleanupGate.replacedWord(in: input, language: language),
+           outputWords.contains(where: { $0 == old || LLMOutputGuard.sharesStem($0, old) }) { return false }
         // Nouns and names of the new version have no synonym worth the risk: each of them must be there
         // ("Tinte, Toner, nein, Papier und Stifte" must not become "Tinte, Toner und Stifte").
         return capitalizedWords(in: input).filter(changed.contains).allSatisfy(survives)
