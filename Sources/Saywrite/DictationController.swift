@@ -185,18 +185,26 @@ final class DictationController {
         guard !state.builtinState.isBusy else { return }
         let spec = modelSpec
         let store = modelStore
-        let start = store.partialBytes(spec)
-        state.builtinState = .downloading(Double(start) / Double(spec.size))
+        state.builtinState = .downloading(Double(store.partialBytes(spec)) / Double(spec.size))
+        let pendingDelete = deleteTask
         downloadTask = Task {
+            // A delete that is still queued behind the engine must finish first, or it would remove
+            // the files of this download.
+            await pendingDelete?.value
             do {
                 let url = try await ModelDownloader(spec: spec, store: store).run { phase in
                     Task { @MainActor in self.applyDownload(phase) }
                 }
                 // Load the model once now: the first run on a Mac compiles the Metal kernels, which
                 // would otherwise delay the first dictation.
-                state.builtinState = .optimizing
-                await LlamaEngine.shared.prewarm(modelURL: url, language: prewarmLanguage, forRewrite: false)
-                state.builtinState = LlamaEngine.shared.isLoaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
+                if settings.llmBackend == .builtin {
+                    state.builtinState = .optimizing
+                    await LlamaEngine.shared.prewarm(modelURL: url, language: prewarmLanguage, forRewrite: false)
+                    state.builtinState = LlamaEngine.shared.isLoaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
+                } else {
+                    // Switched to Ollama meanwhile: the model stays on disk, not in memory.
+                    state.builtinState = .initial(for: store.status(spec))
+                }
             } catch is CancellationError {
                 state.builtinState = .initial(for: store.status(spec))
             } catch {
@@ -217,7 +225,8 @@ final class DictationController {
         case .downloading(let progress):
             if case .downloading = state.builtinState { state.builtinState = .downloading(progress.fraction) }
         case .verifying:
-            if state.builtinState.isBusy { state.builtinState = .verifying }
+            // Late updates must not overwrite .optimizing or a finished state.
+            if case .downloading = state.builtinState { state.builtinState = .verifying }
         }
     }
 
@@ -227,13 +236,17 @@ final class DictationController {
     }
 
     /// Deletes the model file and what is left of a download.
+    private var deleteTask: Task<Void, Never>?
+
     func deleteBuiltinModel() {
         downloadTask?.cancel()
         downloadTask = nil
         let spec = modelSpec
         let store = modelStore
         state.builtinState = .notDownloaded
-        Task {
+        let previous = deleteTask
+        deleteTask = Task {
+            await previous?.value
             await LlamaEngine.shared.unloadThenRun { store.delete(spec) }
         }
     }
@@ -612,11 +625,7 @@ final class DictationController {
                 selectionChanged = true
                 outcome = .copiedToClipboard
             }
-            let summary = ChangeSummarizer.summarize(raw: selection, final: rewritten, usedLLM: true, llmFailed: false)
-            let result = DictationResult(
-                raw: HistoryStore.rewriteRaw(instruction: instruction), final: rewritten, style: .neutral,
-                appBundleID: app, summary: summary, latency: 0)
-            if outcome != .secureField { appendToHistory(result) }
+            // A rewrite is not written to the history: its result is the user's own document.
             switch outcome {
             case .pasted: break
             case .copiedToClipboard where selectionChanged:

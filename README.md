@@ -31,7 +31,7 @@ Most dictation apps run every sentence you say through a language model. That is
 - ⚡ **Text before you blink.** Saywrite transcribes and cleans up *while you are still talking*. When you tap the key to stop, the work is basically done: typically **about a quarter of a second from stop to text**, including AI corrections.
 - 🎯 **AI only where it is needed.** Every dictation gets instant, deterministic cleanup: filler words, stutters, capitalization, punctuation and spoken commands. The language model only sees the **sentence** that needs it (plus the one before, when you correct yourself across a pause). Everything else stays exactly as you said it.
 - 👀 **You always know what changed.** After every dictation the pill shows a summary like `2 filler words · AI: 1 correction`, and one click on **↩ Original** swaps in the version without AI.
-- 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model is built in and runs on your Mac with llama.cpp (no Ollama needed). Nothing leaves your Mac and there is no telemetry; the only network traffic is the one-time model download. If you choose Ollama as the engine and point Saywrite at a server elsewhere, the settings warn you that your dictations go there.
+- 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model is built in and runs on your Mac with llama.cpp (no Ollama needed). Nothing leaves your Mac and there is no telemetry; the only network traffic is the one-time download of the speech model and, when you click Download, of the language model. If you choose Ollama as the engine and point Saywrite at a server elsewhere, the settings warn you that your dictations go there.
 - 🪶 **Light on memory.** Built for an 8 GB MacBook. The speech model lives on the Neural Engine, and the LLM is loaded when you start dictating and released after 15 idle minutes.
 - 🌍 **English and German**, with automatic language detection. The speech model understands 25 European languages.
 
@@ -52,7 +52,7 @@ Most dictation apps run every sentence you say through a language model. That is
 | **Spoken commands** | comma, question mark, exclamation mark, colon, semicolon, open/close quote, open/close paren, new line, new paragraph. The German equivalents work too. |
 | **Knows what to leave alone** | "The comma is missing", "a new line of credit", "I think that that is right", e-mail addresses, URLs and abbreviations like "e.g." stay exactly as spoken. |
 | **Safe AI** | A guard rejects model output that answers your question instead of transcribing it, invents text, or loses a number you corrected to. You then get the rule-cleaned version. Rewrites are checked too: a chat preamble is stripped, and an essay or an echoed instruction leaves your text unchanged. If the model times out once, the rest of that dictation goes without AI instead of waiting again for every sentence. |
-| **Never loses a word** | If the model is missing, still loading or slow, the rules-only text is inserted. If you switch to another app while the text is being prepared, it is copied instead of landing in the wrong window. "Nothing heard" and a silent microphone are reported, and your recent dictations are kept in the history (readable by your user only). Password fields are detected: nothing is recorded or inserted there, and that dictation is not saved. Where an app hides its password field from Accessibility (some browsers, terminals), secure input is the only hint: the dictation is then kept off the AI server and copied for ⌘V instead of pasted. The history lives on disk for 30 days at most and can be turned off in Settings; a rewrite stores only your instruction, never the selected text. |
+| **Never loses a word** | If the model is missing, still loading or slow, the rules-only text is inserted. If you switch to another app while the text is being prepared, it is copied instead of landing in the wrong window. "Nothing heard" and a silent microphone are reported, and your recent dictations are kept in the history (readable by your user only). Password fields are detected: nothing is recorded or inserted there, and that dictation is not saved. Where an app hides its password field from Accessibility (some browsers, terminals), secure input is the only hint: the dictation is then kept off the AI server and copied for ⌘V instead of pasted. The history lives on disk for 30 days at most and can be turned off in Settings; rewrites (selected text plus result) are never stored. |
 | **Your microphone** | Pick any input device. Switching to AirPods mid-dictation is handled. |
 | **Hands-free safety** | A forgotten recording stops by itself after 60 s of silence. |
 
@@ -72,8 +72,8 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 
 | Test set | Cases | Exactly right |
 |---|---|---|
-| English | 130 | ~90 % |
-| German | 112 | ~90 % |
+| English | 131 | ~95 % |
+| German | 122 | ~92 % |
 
 The sets cover everyday messages, e-mails, self-corrections of many shapes, sentences that must not change, numbers, dates, URLs, math, spoken commands and all three styles.
 
@@ -134,7 +134,7 @@ open /Applications/Saywrite.app
 
 ### The AI model
 
-Saywrite has a language model built in (llama.cpp, running on the GPU of your Mac), so it no longer needs Ollama. It is not part of the download. On first launch the **Setup** tab of the settings shows the row **AI (built-in)** with the model's size (about 1.8 GB) and its licence. Click **Download**: Saywrite fetches the file once from Hugging Face into `~/Library/Application Support/Saywrite/Models/`, shows the progress, can pause and resume it, and checks the SHA-256 before it uses the file (a corrupted download is deleted). Nothing is downloaded until you click. The model is loaded when you start dictating and released after 15 idle minutes or when macOS is short on memory. To remove it, press **Delete model** in the settings, or delete that folder.
+Saywrite has a language model built in (llama.cpp, running on the GPU of your Mac), so it no longer needs Ollama. It is not part of the download. On first launch the **Setup** tab of the settings shows the row **AI (built-in)** with the model's size (about 1.8 GB) and its licence. Click **Download**: Saywrite fetches the file once from Hugging Face into `~/Library/Application Support/Saywrite/Models/`, shows the progress, can pause and resume it, and checks the SHA-256 once the download is complete (a corrupted download is deleted; later launches only compare the file size). Nothing is downloaded until you click. The model is loaded when you start dictating and released after 15 idle minutes or when macOS is short on memory. To remove it, press **Delete model** in the settings, or delete that folder.
 
 Without the model Saywrite still works with rule-based cleanup only.
 

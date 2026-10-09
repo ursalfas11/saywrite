@@ -396,8 +396,8 @@ private struct HistoryTab: View {
         VStack(alignment: .leading) {
             Toggle(L("Keep recent dictations on this Mac", "Letzte Diktate auf diesem Mac behalten"), isOn: $settings.keepHistory)
                 .onChange(of: settings.keepHistory) { _, keep in if !keep { controller.clearHistory() } }
-            Text(L("Stored unencrypted for 30 days at most, readable by your user only. A rewrite keeps only your spoken instruction, never the selected text.",
-                   "Unverschlüsselt gespeichert, höchstens 30 Tage, nur für deinen Benutzer lesbar. Bei einer Umformulierung bleibt nur die gesprochene Anweisung, nie der markierte Text."))
+            Text(L("Stored unencrypted for 30 days at most, readable by your user only. Rewrites are not stored.",
+                   "Unverschlüsselt gespeichert, höchstens 30 Tage, nur für deinen Benutzer lesbar. Umformulierungen werden nicht gespeichert."))
                 .font(.caption).foregroundStyle(.secondary)
             if state.history.isEmpty {
                 Spacer()

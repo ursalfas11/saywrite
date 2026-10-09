@@ -36,8 +36,16 @@ final class AppRulesTests: XCTestCase {
         XCTAssertFalse(PasteTargetRules.secureFieldMayBeInvisible(bundleID: "com.apple.mail", isElectron: false))
     }
 
-    func testRewriteHistoryKeepsNoSelection() {
-        XCTAssertEqual(HistoryStore.rewriteRaw(instruction: "kürzer"), "[kürzer]")
+    func testHistoryPurgesRewriteEntriesOfEarlierVersions() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("hist-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = HistoryStore(fileURL: url)
+        let summary = ChangeSummarizer.summarize(raw: "a", final: "a", usedLLM: false, llmFailed: false)
+        store.append(DictationResult(raw: "[kürzer] Vertraulicher Absatz", final: "Kurzer Absatz", style: .neutral, appBundleID: nil, summary: summary, latency: 0))
+        store.append(DictationResult(raw: "[kürzer]", final: "Kurzer Absatz", style: .neutral, appBundleID: nil, summary: summary, latency: 0))
+        store.append(DictationResult(raw: "ganz normal", final: "Ganz normal.", style: .neutral, appBundleID: nil, summary: summary, latency: 0))
+        XCTAssertEqual(HistoryStore(fileURL: url).items.map(\.final), ["Ganz normal."])
+        XCTAssertFalse(try String(contentsOf: url, encoding: .utf8).contains("Vertraulicher"))
     }
 
     func testHistoryDropsOldEntries() throws {

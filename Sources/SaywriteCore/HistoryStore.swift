@@ -16,6 +16,18 @@ public final class HistoryStore: @unchecked Sendable {
         } else {
             cache = []
         }
+        // Earlier versions stored a rewrite as "[instruction] selected text": drop those once.
+        let kept = cache.filter { !Self.isRewriteEntry($0) }
+        if kept.count != cache.count {
+            cache = kept
+            save(kept)
+        }
+    }
+
+    /// An entry written for a rewrite by an earlier version: "[instruction]" plus the selected text.
+    /// Rewrites are no longer stored at all, the selection and its result are the user's own document.
+    static func isRewriteEntry(_ result: DictationResult) -> Bool {
+        result.raw.hasPrefix("[") && result.raw.contains("]")
     }
 
     public static func defaultFileURL() -> URL {
@@ -47,12 +59,6 @@ public final class HistoryStore: @unchecked Sendable {
         cache = kept
         lock.unlock()
         if changed { save(kept) }
-    }
-
-    /// The text stored for a rewrite: only the instruction. The selected text is the user's own
-    /// document, not something Saywrite produced, and is never written to disk.
-    public static func rewriteRaw(instruction: String) -> String {
-        "[\(instruction)]"
     }
 
     public func clear() {
