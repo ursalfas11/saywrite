@@ -15,7 +15,7 @@ Local, instant AI dictation for macOS that only lets AI touch your words when th
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native-black)
 ![Swift 6](https://img.shields.io/badge/Swift-6-orange?logo=swift)
-![100% offline](https://img.shields.io/badge/offline-100%25-brightgreen)
+![on-device](https://img.shields.io/badge/on--device-no%20telemetry-brightgreen)
 
 <img src="docs/images/overlay-recording.png" width="360" alt="Saywrite recorder pill: stop button, level meter, microphone">
 
@@ -134,7 +134,7 @@ open /Applications/Saywrite.app
 
 ### The AI model
 
-Saywrite has a language model built in (llama.cpp, running on the GPU of your Mac), so it no longer needs Ollama. It is not part of the download. On first launch the **Setup** tab of the settings shows the row **AI (built-in)** with the model's size (about 1.9 GB) and its licence. Click **Download**: Saywrite fetches the file once from Hugging Face into `~/Library/Application Support/Saywrite/Models/`, shows the progress, can pause and resume it, and checks the SHA-256 once the download is complete (a corrupted download is deleted; later launches only compare the file size). Nothing is downloaded until you click. The model is loaded when you start dictating and released after 15 idle minutes or when macOS is short on memory. To remove it, press **Delete model** in the settings, or delete that folder. The built-in model reads about 4000 tokens at once (roughly 10 000 characters of text including the answer); a longer selection for a rewrite is refused with "Selection too long for the built-in AI" and stays unchanged. Use the Ollama engine for such texts.
+Saywrite has a language model built in (llama.cpp, running on the GPU of your Mac), so it no longer needs Ollama. It is not part of the download. On first launch the **Setup** tab of the settings shows the row **AI (built-in)** with the model's size (about 1.9 GB) and its licence. Click **Download**: Saywrite fetches the file once from Hugging Face into `~/Library/Application Support/Saywrite/Models/`, shows the progress, can pause and resume it, and checks the SHA-256 once the download is complete (a corrupted download is deleted; later launches only compare the file size). Nothing is downloaded until you click. The model is loaded when you start dictating and released after 15 idle minutes or when macOS is short on memory. To remove it, press **Delete model** in the settings, or delete that folder. The built-in model reads about 4000 tokens at once (roughly 10 000 characters of text including the answer); a longer selection for a rewrite is refused with "Selection too long for the built-in AI" and stays unchanged. The Ollama engine takes longer selections (up to roughly 30 000 characters); beyond that it refuses too.
 
 Without the model Saywrite still works with rule-based cleanup only.
 

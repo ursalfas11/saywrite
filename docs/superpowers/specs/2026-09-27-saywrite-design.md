@@ -1,7 +1,7 @@
 # Saywrite — Design
 
 Date: 2026-09-27
-Status: implemented (v0.1.0); section "Changes during implementation" records deviations
+Status: implemented (v0.1.0), historical; the built-in llama.cpp engine, the AI-engine setting, the model download and the SaywriteLlama target came later and are described in the README (this document describes the original Ollama-only design); section "Changes during implementation" records deviations
 
 ## Goal
 
