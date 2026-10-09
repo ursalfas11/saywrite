@@ -102,10 +102,17 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
             "options": ["temperature": 0.1, "num_predict": maxTokens],
         ]
         let data = try await post(path: "api/chat", body: body, timeout: timeout)
+        return try Self.parseChatResponse(data)
+    }
+
+    /// The answer text of an /api/chat reply. An answer cut off by the token limit (done_reason "length")
+    /// is rejected: a rewrite would otherwise replace the whole selection with a truncated text.
+    static func parseChatResponse(_ data: Data) throws -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let message = json["message"] as? [String: Any],
               let content = message["content"] as? String
         else { throw LLMError.badResponse }
+        if json["done_reason"] as? String == "length" { throw LLMError.rejectedOutput }
         return content
     }
 

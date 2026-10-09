@@ -27,7 +27,9 @@ public final class HistoryStore: @unchecked Sendable {
     /// An entry written for a rewrite by an earlier version: "[instruction]" plus the selected text.
     /// Rewrites are no longer stored at all, the selection and its result are the user's own document.
     static func isRewriteEntry(_ result: DictationResult) -> Bool {
-        result.raw.hasPrefix("[") && result.raw.contains("]")
+        // Rewrites were stored with latency 0; a dictation always has a measured latency, so "[Applause] thanks"
+        // from a recognizer stays.
+        result.latency == 0 && result.raw.hasPrefix("[") && result.raw.contains("] ")
     }
 
     public static func defaultFileURL() -> URL {

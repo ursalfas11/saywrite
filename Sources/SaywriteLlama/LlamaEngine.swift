@@ -217,15 +217,18 @@ public actor LlamaEngine {
             defer { llama_sampler_free(sampler) }
             var bytes: [UInt8] = []
             var piece = [CChar](repeating: 0, count: 128)
+            var finished = false
             for _ in 0..<budget {
                 if abort.isSet || Task.isCancelled { throw LLMError.timeout }
                 var token = llama_sampler_sample(sampler, context, -1)
-                if llama_vocab_is_eog(vocab, token) { break }
+                if llama_vocab_is_eog(vocab, token) { finished = true; break }
                 let length = Int(llama_token_to_piece(vocab, token, &piece, Int32(piece.count), 0, false))
                 if length > 0 { bytes.append(contentsOf: piece[0..<length].map { UInt8(bitPattern: $0) }) }
                 let status = llama_decode(context, llama_batch_get_one(&token, 1))
                 if status != 0 { throw decodeFailure(abort) }
             }
+            // An answer cut off by the token or context limit must not replace a selection (the catch clears the cache).
+            guard finished else { throw LLMError.rejectedOutput }
             // Keep the prompt, drop the answer.
             _ = llama_memory_seq_rm(memory, 0, Int32(tokens.count), -1)
             return String(decoding: bytes, as: UTF8.self)
