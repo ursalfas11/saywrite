@@ -12,6 +12,15 @@ public enum LLMBackend: String, Sendable, CaseIterable {
         stored.flatMap(LLMBackend.init(rawValue:)) ?? .builtin
     }
 
+    /// The backend at app start. A stored choice wins. Without one, the built-in model is the default,
+    /// except for someone who used the app before the built-in model existed (it needed Ollama) and has
+    /// not downloaded the model yet: their working Ollama setup keeps being used instead of silently
+    /// falling back to rules-only cleanup.
+    public static func resolveAtLaunch(stored: String?, modelInstalled: Bool, usedEarlierVersion: Bool) -> LLMBackend {
+        if let backend = stored.flatMap(LLMBackend.init(rawValue:)) { return backend }
+        return !modelInstalled && usedEarlierVersion ? .ollama : .builtin
+    }
+
     /// The command line tools pick a backend without a stored setting: the built-in model when its
     /// file is there, Ollama otherwise.
     public static func evalDefault(modelInstalled: Bool) -> LLMBackend {

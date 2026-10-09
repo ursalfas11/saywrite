@@ -62,7 +62,17 @@ final class AppSettings: ObservableObject {
         rewriteKey = TriggerKey(rawValue: defaults.string(forKey: "rewriteKey") ?? "") ?? .rightCommand
         language = defaults.string(forKey: "language") ?? "auto"
         aiEnabled = defaults.object(forKey: "aiEnabled") as? Bool ?? true
-        llmBackend = LLMBackend.resolve(stored: defaults.string(forKey: "llmBackend"))
+        let storedBackend = defaults.string(forKey: "llmBackend")
+        let earlierKeys = ["dictateKey", "rewriteKey", "language", "aiEnabled", "ollamaURL", "ollamaModel", "rewriteModel",
+                           "llmTimeout", "inputDeviceUID", "playSounds", "replacements", "styleMap"]
+        let store = defaults
+        let usedEarlierVersion = earlierKeys.contains { store.object(forKey: $0) != nil }
+            || FileManager.default.fileExists(atPath: HistoryStore.defaultFileURL().path)
+        let backend = LLMBackend.resolveAtLaunch(
+            stored: storedBackend, modelInstalled: ModelStore().isInstalled(.qwen25_3b), usedEarlierVersion: usedEarlierVersion)
+        // Remember the decision, so downloading the model later does not switch the engine behind the user's back.
+        if LLMBackend(rawValue: storedBackend ?? "") == nil { store.set(backend.rawValue, forKey: "llmBackend") }
+        llmBackend = backend
         ollamaURL = defaults.string(forKey: "ollamaURL") ?? "http://localhost:11434"
         ollamaModel = defaults.string(forKey: "ollamaModel") ?? "qwen2.5:3b"
         rewriteModel = defaults.string(forKey: "rewriteModel") ?? ""
