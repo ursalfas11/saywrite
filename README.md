@@ -134,7 +134,7 @@ open /Applications/Saywrite.app
 
 ### The AI model
 
-Saywrite has a language model built in (llama.cpp, running on the GPU of your Mac), so it no longer needs Ollama. It is not part of the download. On first launch the **Setup** tab of the settings shows the row **AI (built-in)** with the model's size (about 1.8 GB) and its licence. Click **Download**: Saywrite fetches the file once from Hugging Face into `~/Library/Application Support/Saywrite/Models/`, shows the progress, can pause and resume it, and checks the SHA-256 once the download is complete (a corrupted download is deleted; later launches only compare the file size). Nothing is downloaded until you click. The model is loaded when you start dictating and released after 15 idle minutes or when macOS is short on memory. To remove it, press **Delete model** in the settings, or delete that folder.
+Saywrite has a language model built in (llama.cpp, running on the GPU of your Mac), so it no longer needs Ollama. It is not part of the download. On first launch the **Setup** tab of the settings shows the row **AI (built-in)** with the model's size (about 1.9 GB) and its licence. Click **Download**: Saywrite fetches the file once from Hugging Face into `~/Library/Application Support/Saywrite/Models/`, shows the progress, can pause and resume it, and checks the SHA-256 once the download is complete (a corrupted download is deleted; later launches only compare the file size). Nothing is downloaded until you click. The model is loaded when you start dictating and released after 15 idle minutes or when macOS is short on memory. To remove it, press **Delete model** in the settings, or delete that folder. The built-in model reads about 4000 tokens at once (roughly 10 000 characters of text including the answer); a longer selection for a rewrite is refused with "Selection too long for the built-in AI" and stays unchanged. Use the Ollama engine for such texts.
 
 Without the model Saywrite still works with rule-based cleanup only.
 
@@ -164,7 +164,7 @@ Everything else is in the menu bar icon → **Settings**: keys, microphone, lang
 
 ## Configuration tips
 
-- **Bigger model for rewriting:** choose, for example, `qwen2.5:7b` under *Model (rewrite)* if you have the RAM. Dictation cleanup stays on the small, fast model.
+- **Bigger model for rewriting:** with the Ollama engine, choose, for example, `qwen2.5:7b` under *Model (rewrite)* if you have the RAM (the built-in engine always uses its one bundled model). Dictation cleanup stays on the small, fast model.
 - **Less AI in an app:** set that app to *Casual*, which uses AI only for explicit self-corrections, or switch AI off entirely in the menu.
 - **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call, without your dictated text (only its length). Add `SAYWRITE_DEBUG_TEXT=1` to log the text as well; that log contains your dictations, so delete it when you are done.
 
