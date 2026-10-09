@@ -68,12 +68,12 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 | Two sentences with a correction (8 s) | – | 0.24 s |
 | Four sentences with pauses (17 s) | 0.09–0.13 s | – |
 
-**Text quality** (`make eval`, realistic recognizer output typed into the eval sets and run through the full pipeline with the local LLM; the speech model itself is not part of this measurement):
+**Text quality** (`make eval` runs both sets, realistic recognizer output typed into the eval sets and run through the full pipeline with the local LLM; the speech model itself is not part of this measurement):
 
 | Test set | Cases | Exactly right |
 |---|---|---|
 | English | 130 | ~90 % |
-| German | 107 | ~90 % |
+| German | 112 | ~90 % |
 
 The sets cover everyday messages, e-mails, self-corrections of many shapes, sentences that must not change, numbers, dates, URLs, math, spoken commands and all three styles.
 
@@ -119,6 +119,8 @@ flowchart LR
 
 Each release lists the SHA-256 of the zip next to it.
 
+**Signing trade-off.** The app is signed ad hoc with a requirement on the bundle identifier (`dev.saywrite.app`) only, so macOS keeps the Accessibility and Microphone permissions when you update or rebuild. The flip side: macOS trusts any binary that carries that identifier, so other code running as your user could sign itself the same way and inherit those permissions. Closing this needs a Developer ID certificate (team-bound requirement, hardened runtime, notarization), which is on the roadmap. Until then, install Saywrite only from this repository's releases or your own build, and verify the SHA-256.
+
 ### Build from source
 
 Needs Xcode 16+ (the Command Line Tools alone cannot build the SwiftUI app).
@@ -162,7 +164,8 @@ Everything else is in the menu bar icon → **Settings**: keys, microphone, lang
 
 ```bash
 make test                   # unit tests for the text pipeline
-make eval                   # quality evaluation with the real local LLM (German set)
+make eval                   # quality evaluation with the real local LLM (German and English set)
+make eval-rules             # rules-only eval against the thresholds in Tests/Eval/rules-baseline.txt (what CI runs)
 swift run -c release SaywriteEval Tests/Eval/cases.json --model qwen2.5:7b --report Tests/Eval/results.jsonl
 swift run -c release SaywriteEval Tests/Eval/cases-en.json   # English set
 make run                    # build the .app and launch it
