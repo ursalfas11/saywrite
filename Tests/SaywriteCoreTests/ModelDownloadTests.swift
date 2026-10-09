@@ -10,6 +10,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         var body = Data()
         /// Send only this many bytes, then drop the connection.
         var cutAfter: Int?
+        var failCode: URLError.Code = .networkConnectionLost
     }
 
     nonisolated(unsafe) static var handler: ((URLRequest) -> Answer)?
@@ -46,7 +47,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         if answer.cutAfter != nil {
             // Let the delegate see the bytes that did arrive before the connection drops.
             Thread.sleep(forTimeInterval: 0.3)
-            client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            client?.urlProtocol(self, didFailWithError: URLError(answer.failCode))
         } else {
             client?.urlProtocolDidFinishLoading(self)
         }
