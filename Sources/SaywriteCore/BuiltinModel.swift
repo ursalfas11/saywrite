@@ -51,7 +51,30 @@ public enum BuiltinModelState: Sendable, Equatable {
 /// The chat format of the Qwen2.5 models (ChatML), the same as the template Ollama applies.
 public enum ChatTemplate {
     public static func qwen(system: String, user: String) -> String {
-        "<|im_start|>system\n\(system)<|im_end|>\n<|im_start|>user\n\(user)<|im_end|>\n<|im_start|>assistant\n"
+        "<|im_start|>system\n\(plain(system))<|im_end|>\n<|im_start|>user\n\(plain(user))<|im_end|>\n<|im_start|>assistant\n"
+    }
+
+    /// The engine tokenizes the whole string with control tokens enabled, so a literal `<|im_end|>` in a
+    /// dictation or a selected text would end the turn. Ollama keeps such text as plain text; here the
+    /// `<|` and `|>` brackets are removed from the content, which leaves "im_end" as harmless words.
+    static func plain(_ text: String) -> String {
+        var result = text
+        while result.contains("<|") || result.contains("|>") {
+            result = result.replacingOccurrences(of: "<|", with: "<").replacingOccurrences(of: "|>", with: ">")
+        }
+        return result
+    }
+}
+
+/// How much of the cached prompt a new request can reuse.
+public enum KVCachePlan {
+    /// The length of the common prefix of `cached` and `tokens`, but at least one token short of the
+    /// whole prompt, because the last token must be decoded to get logits.
+    public static func keep(cached: [Int32], tokens: [Int32]) -> Int {
+        var keep = 0
+        while keep < min(cached.count, tokens.count), cached[keep] == tokens[keep] { keep += 1 }
+        if keep == tokens.count { keep -= 1 }
+        return max(0, keep)
     }
 }
 

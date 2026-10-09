@@ -147,8 +147,10 @@ public actor LlamaEngine {
 
     /// Frees the model before the process exits, blocking the caller for at most `timeout` seconds.
     /// ggml asserts in a static destructor when a Metal model is still alive at exit.
-    public nonisolated func shutdown(timeout: TimeInterval = 3) {
-        guard isLoaded else { return }
+    /// Also covers a load or a request that is running: the unload is queued behind it, and a running
+    /// request is told to stop so the queue moves on.
+    public nonisolated func shutdown(timeout: TimeInterval = 5) {
+        abortBox.flag?.set()
         let done = DispatchSemaphore(value: 0)
         Task.detached { await self.unload(); done.signal() }
         _ = done.wait(timeout: .now() + timeout)
@@ -193,9 +195,7 @@ public actor LlamaEngine {
         let budget = max(1, min(maxTokens, contextSize - tokens.count))
 
         let memory = llama_get_memory(context)
-        var keep = 0
-        while keep < min(cachedTokens.count, tokens.count), cachedTokens[keep] == tokens[keep] { keep += 1 }
-        if keep == tokens.count { keep -= 1 } // the last token must be decoded to get logits
+        var keep = KVCachePlan.keep(cached: cachedTokens, tokens: tokens)
         if keep > 0, !llama_memory_seq_rm(memory, 0, Int32(keep), -1) { keep = 0 }
         if keep == 0 { llama_memory_clear(memory, true) }
         cachedTokens = []
