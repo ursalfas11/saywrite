@@ -105,7 +105,23 @@ flowchart LR
 
 ## Install
 
-**Requirements:** macOS 14+ on Apple Silicon, Xcode 16+ to build.
+**Requirements:** macOS 14+ on Apple Silicon.
+
+### Download (no Xcode needed)
+
+1. Download `Saywrite-vX.Y.Z.zip` from the [latest release](https://github.com/ursalfas11/saywrite/releases/latest) and unzip it.
+2. Move `Saywrite.app` to `/Applications`.
+3. Open it. Saywrite is signed ad hoc, not notarized by Apple, so macOS blocks the first launch. Either right-click the app → **Open** → **Open**, or run once:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Saywrite.app
+   ```
+
+Each release lists the SHA-256 of the zip next to it.
+
+### Build from source
+
+Needs Xcode 16+ (the Command Line Tools alone cannot build the SwiftUI app).
 
 ```bash
 git clone https://github.com/ursalfas11/saywrite.git
