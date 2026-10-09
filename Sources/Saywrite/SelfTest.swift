@@ -21,7 +21,13 @@ enum SelfTest {
         let modelURL = store.fileURL(.qwen25_3b)
         let backend: LLMBackend
         if let index = arguments.firstIndex(of: "--backend"), index + 1 < arguments.count {
-            backend = arguments[index + 1] == "ollama" ? .ollama : .builtin
+            switch arguments[index + 1] {
+            case "ollama": backend = .ollama
+            case "llama", "builtin": backend = .builtin
+            case let other:
+                print("unknown --backend \(other) (llama or ollama)")
+                return 2
+            }
         } else {
             backend = LLMBackend.evalDefault(modelInstalled: store.isInstalled(.qwen25_3b))
         }

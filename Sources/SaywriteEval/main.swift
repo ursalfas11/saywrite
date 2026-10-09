@@ -2,7 +2,7 @@
 // Usage: swift run -c release SaywriteEval [Tests/Eval/cases.json] [--no-ai] [--verbose]
 //        [--backend llama|ollama] [--model qwen2.5:3b] [--model-path file.gguf] [--report Tests/Eval/results.jsonl]
 // --backend defaults to llama (the built-in model) when its file is in ~/Library/Application Support/Saywrite/Models,
-// otherwise ollama. --model names the Ollama model, --model-path the GGUF file of the built-in one.
+// otherwise ollama (--model alone also selects ollama). --model names the Ollama model, --model-path the GGUF file of the built-in one.
 // --report appends one JSON line per run (date, set, model, result), so the quality claims in the
 // README have a history instead of a single number.
 // Each case is one dictation (one or more recognizer segments; a leading "+" marks a segment that
@@ -62,6 +62,8 @@ let backend: LLMBackend
 switch option("--backend") {
 case "llama", "builtin": backend = .builtin
 case "ollama": backend = .ollama
+// An explicit Ollama model name means the run is meant for Ollama.
+case nil where option("--model") != nil: backend = .ollama
 case nil: backend = LLMBackend.evalDefault(modelInstalled: FileManager.default.fileExists(atPath: modelPath))
 case let other?:
     print("unknown --backend \(other) (llama or ollama)")
