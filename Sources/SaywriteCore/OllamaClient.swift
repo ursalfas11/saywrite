@@ -33,7 +33,13 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
     public let configuration: Configuration
     private let session: URLSession
 
-    public init(configuration: Configuration, session: URLSession = .shared) {
+    /// A session that follows redirects only within the same host: a remote server must not be able
+    /// to send the dictation POST on to somewhere else.
+    public static func makeSession() -> URLSession {
+        URLSession(configuration: .ephemeral, delegate: SameHostRedirects(), delegateQueue: nil)
+    }
+
+    public init(configuration: Configuration, session: URLSession = OllamaClient.makeSession()) {
         self.configuration = configuration
         self.session = session
     }
@@ -161,6 +167,35 @@ public extension OllamaClient.Configuration {
         // 127.0.0.0/8, but not a host name like "127.example.com".
         let parts = host.split(separator: ".")
         return parts.count == 4 && parts[0] == "127" && parts.allSatisfy { UInt8($0) != nil }
+    }
+}
+
+final class SameHostRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(Self.allows(from: task.originalRequest?.url, to: request.url) ? request : nil)
+    }
+
+    static func allows(from: URL?, to: URL?) -> Bool {
+        guard let from, let to, let host = from.host?.lowercased(), to.host?.lowercased() == host else { return false }
+        // Never from https down to http.
+        return !(from.scheme?.lowercased() == "https" && to.scheme?.lowercased() != "https")
+    }
+}
+
+/// Validation of the address typed in the settings.
+public enum OllamaEndpoint {
+    /// Trims, assumes http:// when no scheme was typed ("localhost:11434", "192.168.0.5:11434") and
+    /// accepts only http(s) with a host. Nil for anything else.
+    public static func parse(_ text: String) -> URL? {
+        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if !trimmed.contains("://") { trimmed = "http://" + trimmed }
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty
+        else { return nil }
+        return url
     }
 }
 

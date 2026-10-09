@@ -8,6 +8,9 @@ enum InsertOutcome {
     case pasted
     case copiedToClipboard
     case secureField
+    /// Secure event input is on (some app holds it) and the focus is no known text field: the text
+    /// was put on the clipboard instead of being pasted or discarded.
+    case copiedSecureInput
     /// Another app came to the front while the text was being prepared: copied instead of pasted.
     case appChanged
 }
@@ -39,16 +42,32 @@ enum TextInserter {
     private(set) static var lastPasteSupportsUndo = false
 
     private struct Probe: Sendable {
-        var secure: Bool
+        var elementIsSecure: Bool
+        var secureInputEnabled: Bool
         var target: PasteTarget
     }
 
+    /// Whether any app holds secure event input. System-wide: not proof that the focus is a password field.
+    nonisolated static var secureInputActive: Bool { IsSecureEventInputEnabled() }
+
+    /// Whether the focused element is a password field, for a check before the dictation is processed.
+    static func focusIsSecureField() async -> Bool {
+        await Task.detached { focusedElement().map(isSecureField) == true }.value
+    }
+
     /// Everything insert() needs to know from Accessibility, gathered on a background thread.
-    private nonisolated static func probe(bundleID: String, isElectron: Bool) -> Probe {
-        let element = focusedElement()
-        if IsSecureEventInputEnabled() || element.map(isSecureField) == true {
-            return Probe(secure: true, target: .none)
+    private nonisolated static func probe(bundleID: String, pid: pid_t, isElectron: Bool) -> Probe {
+        // Chromium and Electron build their accessibility tree only on request; without it a
+        // password field there looks like no field at all.
+        if PasteTargetRules.shouldEnableManualAccessibility(bundleID: bundleID, isElectron: isElectron) {
+            let application = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(application, 0.3)
+            AXUIElementSetAttributeValue(application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         }
+        let element = focusedElement()
+        let elementIsSecure = element.map(isSecureField) == true
+        let secureInput = IsSecureEventInputEnabled()
+        if elementIsSecure { return Probe(elementIsSecure: true, secureInputEnabled: secureInput, target: .none) }
         var focus: PasteTargetRules.Focus?
         if let element {
             var role: CFTypeRef?
@@ -60,7 +79,9 @@ enum TextInserter {
                 && isEditableDocument(element)
             focus = PasteTargetRules.Focus(role: roleName, selectedRangeSettable: settable.boolValue, editableDocument: editable)
         }
-        return Probe(secure: false, target: PasteTargetRules.decide(bundleID: bundleID, focus: focus, isElectron: isElectron))
+        return Probe(
+            elementIsSecure: false, secureInputEnabled: secureInput,
+            target: PasteTargetRules.decide(bundleID: bundleID, focus: focus, isElectron: isElectron))
     }
 
     /// WebKit marks an editable document (Mail compose, rich-text editors in an iframe) with an
@@ -75,7 +96,7 @@ enum TextInserter {
         return valueSettable.boolValue
     }
 
-    private static func isElectron(_ app: NSRunningApplication) -> Bool {
+    static func isElectron(_ app: NSRunningApplication) -> Bool {
         guard let url = app.bundleURL else { return false }
         return FileManager.default.fileExists(atPath: url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path)
     }
@@ -84,7 +105,9 @@ enum TextInserter {
     /// text is copied instead of landing in the wrong window.
     /// `onPasted` runs right after ⌘V was sent, before the clipboard is restored, so feedback
     /// (sound, closing the panel) is not delayed by the restore wait.
-    static func insert(_ text: String, expectedApp: String? = nil, onPasted: (() -> Void)? = nil) async -> InsertOutcome {
+    /// `recordsUndo` is false for a paste that belongs to no running dictation ("Paste last"), so it
+    /// does not change whether the pill of another dictation offers "Original".
+    static func insert(_ text: String, expectedApp: String? = nil, recordsUndo: Bool = true, onPasted: (() -> Void)? = nil) async -> InsertOutcome {
         let pasteboard = NSPasteboard.general
         // Only a missing frontmost app means "nowhere to paste" up front; Electron apps (Slack,
         // VS Code, Discord) often expose no focused element but accept ⌘V.
@@ -99,11 +122,19 @@ enum TextInserter {
             return .appChanged
         }
         let electron = isElectron(app)
-        let probed = await Task.detached { probe(bundleID: bundleID, isElectron: electron) }.value
-        if probed.secure { return .secureField }
+        let pid = app.processIdentifier
+        let probed = await Task.detached { probe(bundleID: bundleID, pid: pid, isElectron: electron) }.value
         let target = probed.target
+        switch SecureInputRules.decide(elementIsSecure: probed.elementIsSecure, secureInputEnabled: probed.secureInputEnabled, target: target) {
+        case .secureField: return .secureField
+        case .copyOnly:
+            Debug.log("secure input active, focus unknown in \(bundleID): copying")
+            copy(text)
+            return .copiedSecureInput
+        case .proceed: break
+        }
         Debug.log("paste target \(target) in \(bundleID)")
-        lastPasteSupportsUndo = target == .textField
+        if recordsUndo { lastPasteSupportsUndo = target == .textField }
         guard target != .none else {
             copy(text)
             return .copiedToClipboard
@@ -142,9 +173,27 @@ enum TextInserter {
         return .pasted
     }
 
-    private static func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+    /// Puts text on the clipboard for a manual ⌘V, marked so clipboard managers do not record it.
+    static func copy(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        for type in transientTypes { item.setString("", forType: type) }
+        pasteboard.writeObjects([item])
+    }
+
+    /// Gives the user's clipboard back when the app quits while a paste is still waiting to restore it.
+    static func restorePendingClipboard() {
+        guard case .some(.some(let saved)) = userClipboard,
+              NSPasteboard.general.changeCount == lastWrittenChangeCount else { return }
+        restorePasteboard(saved)
+        userClipboard = nil
+    }
+
+    /// The selection of the focused element as it is now, to check a rewrite still targets it.
+    static func currentSelection() async -> SelectionReading {
+        await Task.detached { selectionViaAccessibility() }.value
     }
 
     /// Undo the last edit in the frontmost app (used to swap the inserted text for the original).
@@ -187,13 +236,7 @@ enum TextInserter {
 
     // MARK: - Helpers
 
-    private enum AXSelection: Sendable {
-        case text(String)
-        case empty
-        case unavailable
-    }
-
-    private nonisolated static func selectionViaAccessibility() -> AXSelection {
+    private nonisolated static func selectionViaAccessibility() -> SelectionReading {
         guard let element = focusedElement() else { return .unavailable }
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &value) == .success else {
