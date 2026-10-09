@@ -157,7 +157,7 @@ public actor DictationSession {
             // "… Aber nee, vergiss das, ich meine …" corrects the sentence before it. That needs the
             // previous sentence as input; a correction at the very start of a segment is handled
             // in `finish()`, where the previous segment is known.
-            if CleanupGate.startsWithCorrection(unit, language: language) {
+            if CleanupGate.correctsPrevious(unit, previous: output.last, language: language) {
                 guard let llm, let previous = output.popLast() else {
                     output.append(unit)
                     continue
@@ -230,7 +230,7 @@ public actor DictationSession {
         var units: [String] = []
         for segment in spoken {
             var segmentUnits = segment.units
-            if segment.continuesPrevious, !units.isEmpty, let first = segmentUnits.first, CleanupGate.startsWithCorrection(first, language: language) {
+            if segment.continuesPrevious, !units.isEmpty, let first = segmentUnits.first, CleanupGate.correctsPrevious(first, previous: units.last, language: language) {
                 // "am Donnerstag, | nein, am Freitag": keep apart so the correction pass below sees it.
                 units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1])
             } else if segment.continuesPrevious, !units.isEmpty, !segmentUnits.isEmpty {
@@ -248,7 +248,7 @@ public actor DictationSession {
         var index = 1
         while index < units.count {
             // A model that already failed (timeout) is not asked again: that would double the wait.
-            guard CleanupGate.startsWithCorrection(units[index], language: language), let llm,
+            guard CleanupGate.correctsPrevious(units[index], previous: units[index - 1], language: language), let llm,
                   !alreadyTried.contains(units[index]) else {
                 index += 1
                 continue
@@ -298,13 +298,15 @@ public actor DictationSession {
         completed.removeAll()
     }
 
-    /// The corrected numbers and words must be in the result, otherwise the model kept the old version
-    /// ("am Montag nein am Dienstag" -> "am Montag" is refused). Word forms may change ("komme"/"kommen").
+    /// The corrected numbers must be in the result, and at least one word that is new in the corrected
+    /// version, otherwise the model kept the old one ("am Montag nein am Dienstag" -> "am Montag" is
+    /// refused). Synonyms pass ("ich will sechs" -> "ich möchte sechs"), word forms may change.
     static func keepsCorrectedNumbers(_ input: String, _ output: String, _ language: DictationLanguage) -> Bool {
         let outputNumbers = Set(output.split(whereSeparator: { !$0.isNumber }).map(String.init))
         guard CleanupGate.correctedNumbers(in: input, language: language).allSatisfy(outputNumbers.contains) else { return false }
+        let changed = CleanupGate.changedWords(in: input, language: language)
         let outputWords = LLMOutputGuard.words(output)
-        return CleanupGate.correctedWords(in: input, language: language).allSatisfy { word in
+        return changed.isEmpty || changed.contains { word in
             outputWords.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
         }
     }

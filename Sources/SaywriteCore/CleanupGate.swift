@@ -49,6 +49,37 @@ public enum CleanupGate {
         #"^(?:quatsch|korrektur)\b\s*[,:!]"#,
     ]
 
+    /// "Ich meine, …" / "I mean, …" at a sentence start, whatever follows. On its own that is mostly an
+    /// opinion ("Ich meine, ich fand es trotzdem schön"); see `correctsPrevious`.
+    static let echoMarker = #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:ich meine|besser gesagt|oder besser)\s*,"#
+    static let englishEchoMarker = #"^(?:(?:sorry|oh)\s*,?\s+)?(?:i mean|or rather)\s*,"#
+    /// The same marker inside a joined text, for finding where the new version starts.
+    static let echoTail = #"(?:^|[.!?]\s+)(?:ich meine|besser gesagt|oder besser)\s*,\s*\S"#
+    static let englishEchoTail = #"(?:^|[.!?]\s+)(?:i mean|or rather)\s*,\s*\S"#
+
+    /// Whether `sentence` corrects `previous`: a marker at its start, or "Ich meine, …" that repeats
+    /// the sentence before ("Ich möchte fünf Systeme bauen." + "Ich meine, ich will sechs Systeme bauen.").
+    /// Two shared content words tell a correction from an opinion that only starts the same way.
+    public static func correctsPrevious(_ sentence: String, previous: String?, language: DictationLanguage = .german) -> Bool {
+        if startsWithCorrection(sentence, language: language) { return true }
+        guard language != .other, let previous, !previous.isEmpty else { return false }
+        let lower = sentence.lowercased()
+        guard let marker = lower.range(of: language == .english ? englishEchoMarker : echoMarker, options: .regularExpression) else {
+            return false
+        }
+        let before = contentWords(previous.lowercased())
+        let repeated = Set(contentWords(String(lower[marker.upperBound...]))).filter { word in
+            before.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
+        }
+        return repeated.count >= 2
+    }
+
+    static func contentWords(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0.isWhitespace })
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count >= 4 && !fillerWords.contains($0) }
+    }
+
     /// "Nein, um sechs." after a pause: only short fragments count, a full sentence starting with
     /// "Nein, am Montag kann ich leider nicht" is an answer.
     static let bareNein = #"^(?:nein|nee|ne)\b\s*,?\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|erst|\d+|null|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\b"#
@@ -119,10 +150,22 @@ public enum CleanupGate {
             .filter { $0.count >= 3 && !fillerWords.contains($0) && !$0.allSatisfy(\.isNumber) }
     }
 
+    /// The corrected words that are new against the version before the marker ("fünf … bauen ich meine,
+    /// ich will sechs … bauen" -> ["will", "sechs"]): what tells the new version from the old one.
+    public static func changedWords(in text: String, language: DictationLanguage) -> [String] {
+        guard let tail = correctedTail(in: text, language: language) else { return [] }
+        let head = contentWords(String(text.lowercased().dropLast(tail.count)))
+        return correctedWords(in: text, language: language).filter { word in
+            !head.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
+        }
+    }
+
     /// The lowercased text from the last correction marker on, nil without one.
     static func correctedTail(in text: String, language: DictationLanguage) -> Substring? {
         let lower = text.lowercased()
-        let patterns = (language == .english ? englishCorrectionPatterns + englishLeadingPatterns : correctionPatterns + leadingPatterns)
+        let patterns = language == .english
+            ? englishCorrectionPatterns + englishLeadingPatterns + [englishEchoTail]
+            : correctionPatterns + leadingPatterns + [echoTail]
         var lastEnd: String.Index?
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }

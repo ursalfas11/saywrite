@@ -204,4 +204,22 @@ final class ReviewFindingsTests: XCTestCase {
         XCTAssertTrue(DictationSession.keepsCorrectedNumbers(systems, "Ich will sechs verschiedene Systeme bauen.", .german))
         XCTAssertFalse(DictationSession.keepsCorrectedNumbers(systems, "Ich möchte fünf verschiedene Systeme bauen.", .german))
     }
+
+    /// "Ich meine, ich …" starts an opinion, unless it repeats the sentence before: then it corrects it.
+    func testEchoCorrectsPreviousSentence() {
+        XCTAssertTrue(CleanupGate.correctsPrevious(
+            "Ich meine, ich will sechs verschiedene Systeme bauen.", previous: "Ich möchte fünf verschiedene Systeme bauen."))
+        XCTAssertFalse(CleanupGate.correctsPrevious("Ich meine, ich fand es trotzdem schön.", previous: "Das Konzert war laut."))
+        XCTAssertFalse(CleanupGate.correctsPrevious("Ich meine, ich will sechs verschiedene Systeme bauen.", previous: nil))
+        XCTAssertTrue(CleanupGate.correctsPrevious(
+            "I mean, we should order three large pizzas.", previous: "We should order two large pizzas.", language: .english))
+    }
+
+    /// Only the words new in the corrected version count; a synonym for the rest passes.
+    func testChangedWords() {
+        let text = "Ich möchte fünf verschiedene Systeme bauen. Ich meine, ich will sechs verschiedene Systeme bauen."
+        XCTAssertEqual(CleanupGate.changedWords(in: text, language: .german), ["will", "sechs"])
+        XCTAssertTrue(DictationSession.keepsCorrectedNumbers(text, "Ich möchte sechs verschiedene Systeme bauen.", .german))
+        XCTAssertFalse(DictationSession.keepsCorrectedNumbers(text, "Ich möchte fünf verschiedene Systeme bauen.", .german))
+    }
 }
