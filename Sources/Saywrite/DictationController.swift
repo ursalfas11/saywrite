@@ -1,6 +1,7 @@
 import AppKit
 import FluidAudio
 import SaywriteCore
+import SaywriteLlama
 
 /// Observable app status for the menu and settings window.
 @MainActor
@@ -20,6 +21,7 @@ final class AppState: ObservableObject {
 
     @Published var modelState: ModelState = .loading(0)
     @Published var ollamaState: OllamaState = .unknown
+    @Published var builtinState: BuiltinModelState = .initial(for: ModelStore().status(.qwen25_3b))
     @Published var accessibilityGranted = Permissions.accessibilityGranted
     @Published var microphoneGranted = Permissions.microphoneStatus == .granted
     @Published var history: [DictationResult] = []
@@ -36,6 +38,9 @@ final class DictationController {
     let hotkeys: HotkeyMonitor
 
     private let transcriber = ParakeetTranscriber()
+    private let modelStore = ModelStore()
+    private let modelSpec = ModelSpec.qwen25_3b
+    private var downloadTask: Task<Void, Never>?
     private var vad: VadManager?
     private let audio = AudioCapture()
     private let sounds = Sounds()
@@ -119,7 +124,8 @@ final class DictationController {
     func start() {
         hotkeys.start()
         Task { await loadModels() }
-        Task { await refreshOllamaStatus() }
+        refreshBuiltinState()
+        if settings.llmBackend == .ollama { Task { await refreshOllamaStatus() } }
     }
 
     private func loadModels() async {
@@ -166,6 +172,93 @@ final class DictationController {
 
     private var ollamaRefreshGeneration = 0
 
+    // MARK: - Built-in model
+
+    /// Reads the model file's state from disk, unless a download or the first load is running.
+    func refreshBuiltinState() {
+        guard !state.builtinState.isBusy else { return }
+        state.builtinState = .initial(for: modelStore.status(modelSpec))
+    }
+
+    /// Downloads the model (or continues an interrupted download). Only ever started by a click.
+    func downloadBuiltinModel() {
+        guard !state.builtinState.isBusy else { return }
+        let spec = modelSpec
+        let store = modelStore
+        let start = store.partialBytes(spec)
+        state.builtinState = .downloading(Double(start) / Double(spec.size))
+        downloadTask = Task { [weak self] in
+            do {
+                let url = try await ModelDownloader(spec: spec, store: store).run { phase in
+                    Task { @MainActor [weak self] in
+                        switch phase {
+                        case .downloading(let progress):
+                            if case .downloading = self?.state.builtinState { self?.state.builtinState = .downloading(progress.fraction) }
+                        case .verifying:
+                            self?.state.builtinState = .verifying
+                        }
+                    }
+                }
+                guard let self else { return }
+                // Load the model once now: the first run on a Mac compiles the Metal kernels, which
+                // would otherwise delay the first dictation.
+                self.state.builtinState = .optimizing
+                await LlamaEngine.shared.prewarm(modelURL: url, language: self.prewarmLanguage, forRewrite: false)
+                self.state.builtinState = LlamaEngine.shared.isLoaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
+            } catch is CancellationError {
+                self?.state.builtinState = .initial(for: store.status(spec))
+            } catch {
+                Debug.log("model download failed: \(error)")
+                let partial = store.status(spec)
+                // An interrupted connection leaves the partial file: show it as paused, with the reason.
+                if case .partial = partial, (error as? ModelDownloadError) == .incomplete {
+                    self?.state.builtinState = .failed(L("Download interrupted – continue to resume", "Download unterbrochen – Fortsetzen macht weiter"))
+                } else {
+                    self?.state.builtinState = .failed(error.localizedDescription)
+                }
+            }
+            self?.downloadTask = nil
+        }
+    }
+
+    /// Stops a running download; the partial file stays, so it can be continued.
+    func pauseBuiltinDownload() {
+        downloadTask?.cancel()
+    }
+
+    /// Deletes the model file and what is left of a download.
+    func deleteBuiltinModel() {
+        downloadTask?.cancel()
+        downloadTask = nil
+        let spec = modelSpec
+        let store = modelStore
+        state.builtinState = .notDownloaded
+        Task {
+            await LlamaEngine.shared.unload()
+            store.delete(spec)
+        }
+    }
+
+    /// Called when the backend setting changes: the built-in model leaves memory when Ollama takes over.
+    func backendChanged() {
+        switch settings.llmBackend {
+        case .builtin:
+            refreshBuiltinState()
+        case .ollama:
+            Task { await LlamaEngine.shared.unload() }
+            Task { await refreshOllamaStatus() }
+        }
+    }
+
+    private var prewarmLanguage: DictationLanguage {
+        // Prime the prompt of the language that was dictated last (or the fixed setting).
+        switch settings.language {
+        case "de": return .german
+        case "en": return .english
+        default: return DictationLanguage.lastDetected ?? (UILanguage.isGerman ? .german : .english)
+        }
+    }
+
     func applySettings() {
         hotkeys.dictateKey = settings.dictateKey
         hotkeys.rewriteKey = settings.rewriteKey
@@ -205,14 +298,14 @@ final class DictationController {
 
     private var llm: LLMClient? {
         guard settings.aiEnabled else { return nil }
-        var configuration = settings.ollamaConfiguration
-        // Prime the prompt of the language that was dictated last (or the fixed setting).
-        switch settings.language {
-        case "de": configuration.prewarmLanguage = .german
-        case "en": configuration.prewarmLanguage = .english
-        default: configuration.prewarmLanguage = DictationLanguage.lastDetected ?? (UILanguage.isGerman ? .german : .english)
+        switch settings.llmBackend {
+        case .builtin:
+            return LlamaClient(modelURL: modelStore.fileURL(modelSpec), cleanupTimeout: settings.llmTimeout, prewarmLanguage: prewarmLanguage)
+        case .ollama:
+            var configuration = settings.ollamaConfiguration
+            configuration.prewarmLanguage = prewarmLanguage
+            return OllamaClient(configuration: configuration)
         }
-        return OllamaClient(configuration: configuration)
     }
 
     /// Runs once per session, as soon as it is clear the user really dictates.

@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import SaywriteCore
+import SaywriteLlama
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -41,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // A paste may still be waiting to give the user's clipboard back.
         TextInserter.restorePendingClipboard()
+        // ggml asserts at exit when the Metal model is still loaded.
+        LlamaEngine.shared.shutdown()
     }
 
     /// Accessibility can be granted at any time in System Settings; pick it up without a restart.
@@ -140,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
-        Task { await controller.refreshOllamaStatus() }
+        controller.refreshBuiltinState()
+        if settings.llmBackend == .ollama { Task { await controller.refreshOllamaStatus() } }
     }
 }

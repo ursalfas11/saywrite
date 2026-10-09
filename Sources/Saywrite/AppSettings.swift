@@ -38,6 +38,8 @@ final class AppSettings: ObservableObject {
     @Published var rewriteKey: TriggerKey { didSet { defaults.set(rewriteKey.rawValue, forKey: "rewriteKey") } }
     @Published var language: String { didSet { defaults.set(language, forKey: "language") } }
     @Published var aiEnabled: Bool { didSet { defaults.set(aiEnabled, forKey: "aiEnabled") } }
+    /// Which engine does the AI cleanup: the built-in model (default) or an Ollama server.
+    @Published var llmBackend: LLMBackend { didSet { defaults.set(llmBackend.rawValue, forKey: "llmBackend") } }
     @Published var ollamaURL: String { didSet { defaults.set(ollamaURL, forKey: "ollamaURL") } }
     @Published var ollamaModel: String { didSet { defaults.set(ollamaModel, forKey: "ollamaModel") } }
     /// Empty means: same model as for cleanup.
@@ -60,6 +62,7 @@ final class AppSettings: ObservableObject {
         rewriteKey = TriggerKey(rawValue: defaults.string(forKey: "rewriteKey") ?? "") ?? .rightCommand
         language = defaults.string(forKey: "language") ?? "auto"
         aiEnabled = defaults.object(forKey: "aiEnabled") as? Bool ?? true
+        llmBackend = LLMBackend.resolve(stored: defaults.string(forKey: "llmBackend"))
         ollamaURL = defaults.string(forKey: "ollamaURL") ?? "http://localhost:11434"
         ollamaModel = defaults.string(forKey: "ollamaModel") ?? "qwen2.5:3b"
         rewriteModel = defaults.string(forKey: "rewriteModel") ?? ""
