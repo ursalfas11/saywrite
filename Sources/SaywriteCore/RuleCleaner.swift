@@ -69,6 +69,13 @@ public enum RuleCleaner {
         "no", "wait", "actually", "oops", "never", "scratch", "i", "we", "but", "so", "then",
     ]
 
+    /// More sentence openers after a short date ("am 13.5. Bitte alle einladen"): a date is rarely
+    /// followed by a capitalized noun, so these end the sentence.
+    static let sentenceStartsAfterDate: Set<String> = [
+        "bitte", "das", "wir", "danke", "der", "die", "es", "hier", "er", "sie", "du", "ihr", "man", "alle", "dazu", "leider",
+        "please", "thanks", "the", "it", "this", "that", "he", "she", "they", "you",
+    ]
+
     /// The first word of `text` (leading whitespace skipped).
     static func firstWord(of text: Substring) -> Substring {
         text.drop(while: { $0.isWhitespace }).prefix(while: { !$0.isWhitespace })
@@ -87,7 +94,10 @@ public enum RuleCleaner {
         let isShortDate = body.range(of: #"^\d{1,2}\.\d{1,2}(?:\.\d{2,4})?$"#, options: .regularExpression) != nil
         guard !body.isEmpty, body.allSatisfy(\.isNumber) || isShortDate else { return false }
         let next = firstWord(of: following)
-        if next.first?.isUppercase == true, sentenceStartsAfterNumber.contains(normalizeToken(String(next))) { return false }
+        if next.first?.isUppercase == true {
+            let word = normalizeToken(String(next))
+            if sentenceStartsAfterNumber.contains(word) || (isShortDate && sentenceStartsAfterDate.contains(word)) { return false }
+        }
         return true
     }
 
@@ -110,6 +120,29 @@ public enum RuleCleaner {
             result = applyLayoutCommands(result)
         }
         result = normalizeWhitespace(result)
+        return result
+    }
+
+    /// Abbreviation-like words that also end a sentence ("Hallo Max.", "bei der Müller GmbH."): when a
+    /// filler after one is removed, the next word has to take over the capital the filler carried.
+    static let sentenceEndingAbbreviations: Set<String> = ["max.", "min.", "gmbh.", "st.", "fr.", "hr.", "mo.", "di.", "mi.", "inc.", "ltd.", "jr.", "sr."]
+
+    static func removeSentenceStartFillers(_ text: String, casedAlternation: String) -> String {
+        let pattern = #"(?:^|(?<=[.?!] ))(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,.…]*\s*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        var result = text
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            var capitalize = false
+            if range.lowerBound > result.startIndex {
+                let before = result[..<range.lowerBound].split(whereSeparator: { $0.isWhitespace }).last.map { $0.lowercased() } ?? ""
+                capitalize = sentenceEndingAbbreviations.contains(before)
+            }
+            result.removeSubrange(range)
+            if capitalize, let first = result[range.lowerBound...].first, first.isLowercase {
+                result.replaceSubrange(range.lowerBound..<result.index(after: range.lowerBound), with: first.uppercased())
+            }
+        }
         return result
     }
 
@@ -139,9 +172,7 @@ public enum RuleCleaner {
         }.joined(separator: "|")
         // A filler at the start of a sentence takes its period with it ("Ähm. Also ..."); anywhere else
         // the period or question mark stays as the sentence end ("morgen äh. Dann").
-        result = result.replacingOccurrences(
-            of: #"(?:^|(?<=[.?!] ))(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,.…]*\s*"#,
-            with: "", options: .regularExpression)
+        result = removeSentenceStartFillers(result, casedAlternation: casedAlternation)
         result = result.replacingOccurrences(
             of: #"(?<![\p{L}\p{N}-])(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,…]*"#,
             with: "", options: .regularExpression)
@@ -479,7 +510,7 @@ public enum RuleCleaner {
         var result = text
         guard let last = result.last else { return result }
         let beforeClosers = result.reversed().first { !"“”»)\"'".contains($0) }
-        if last.isLetter || last.isNumber {
+        if last.isLetter || last.isNumber || "%€$£".contains(last) {
             result.append(".")
         } else if "“”»)".contains(last), let beforeClosers, beforeClosers.isLetter || beforeClosers.isNumber {
             result.append(".")
