@@ -83,7 +83,9 @@ public enum RuleCleaner {
         // Letter-dot abbreviations: u.s., u.k., e.u., i.e.
         if lower.range(of: #"^(?:\p{L}\.){2,}$"#, options: .regularExpression) != nil { return true }
         let body = lower.dropLast()
-        guard !body.isEmpty, body.allSatisfy(\.isNumber) else { return false }
+        // A number ("5.") or a short German date ("3.10.", "15.03.", "1.1.2025.").
+        let isShortDate = body.range(of: #"^\d{1,2}\.\d{1,2}(?:\.\d{2,4})?$"#, options: .regularExpression) != nil
+        guard !body.isEmpty, body.allSatisfy(\.isNumber) || isShortDate else { return false }
         let next = firstWord(of: following)
         if next.first?.isUppercase == true, sentenceStartsAfterNumber.contains(normalizeToken(String(next))) { return false }
         return true

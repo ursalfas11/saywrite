@@ -24,7 +24,7 @@ public enum CleanupGate {
     /// Words before a comma that make "nein," / "moment," an answer or an opener, not a correction.
     static let afterOpener = #"(?<!\b(?:ja|hallo|hi|hey|okay|ok|na|also|tja|naja|gut|danke))"#
     /// Verbs that introduce a quotation: "Er sagte, nein, das mache ich nicht".
-    static let quoteVerbs = #"(?:sagte|sagt|sagen|antwortete|antwortet|meinte|fragte|fragt|rief|schrieb|erwiderte|dachte|denkt)"#
+    static let quoteVerbs = #"(?:sagte|sagt|sagen|gesagt|antwortete|antwortet|geantwortet|meinte|gemeint|fragte|fragt|gefragt|rief|gerufen|schrieb|geschrieben|erwiderte|erwidert|dachte|gedacht|denkt)"#
 
     static let correctionPatterns: [String] = [
         #"[\p{L}\p{N}]"# + afterOpener + #",\s*(?:(?:also|oder|ach)\s+)?(?:(?:nein|nee|ne)\s*,\s*"# + notACorrection
@@ -33,6 +33,11 @@ public enum CleanupGate {
         // clause, unless the clause before is a quotation ("Er sagte, nein, das mache ich nicht").
         #"(?:^|[.!?]\s+)(?![^.!?]*\b"# + quoteVerbs + #"\b)[^.!?]*[\p{L}\p{N}]"# + afterOpener
             + #",\s*(?:(?:also|oder|ach)\s+)?(?:nein|nee|ne)\s*,\s*(?=(?:ich|es|das|er|sie|wir|du|der|die|den|dem)\b)\S"#,
+        // "ein Brot, nein, ein Brötchen": the article or possessive is repeated, so "nein," repeats the
+        // phrase instead of answering. notACorrection leaves these out for a plain answer.
+        #"\b(ein|kein|mein|dein|sein|unser|euer)(?:e|en|em|er|es)?\s+[^.!?,]{1,40}?,\s*(?:oder\s+)?(?:nein|nee|ne)\s*,\s*\1(?:e|en|em|er|es)?\s+\S"#,
+        // "nicht vor 8 Uhr, nein, nicht vor 9 Uhr": the negation or a number comes back.
+        #"(?:\bnicht\b|\d|\b(?:null|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\b)[^.!?,]*,\s*(?:oder\s+)?(?:nein|nee|ne)\s*,\s*nicht\s+\S"#,
         #",\s*ich mein(?:e|te)?\b(?!\s+(?:das|es)\s+(?:ernst|so)\b)"#,
         // The recognizer often sets the comma only after the marker: "… bauen ich meine, ich will …".
         #"[\p{L}\p{N}]\s+ich mein(?:e|te)\s*,\s*(?!(?:dass|ob|das|es)\b)\S"#,

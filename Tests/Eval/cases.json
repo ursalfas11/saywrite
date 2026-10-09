@@ -922,5 +922,61 @@
 "Der Termin ist am Dienstag, nein, es ist Mittwoch."
 ],
 "expected": "Der Termin ist am Mittwoch.||Der Termin ist Mittwoch."
+},
+{
+"id": "r6-n1",
+"style": "neutral",
+"segs": [
+"Ich nehme ein Brot, nein, ein Brötchen."
+],
+"expected": "Ich nehme ein Brötchen."
+},
+{
+"id": "r6-n2",
+"style": "neutral",
+"segs": [
+"Wir brauchen eine Pause, nein, eine Besprechung."
+],
+"expected": "Wir brauchen eine Besprechung."
+},
+{
+"id": "r6-n3",
+"style": "neutral",
+"segs": [
+"Ich möchte mein Auto abholen, nein, mein Fahrrad."
+],
+"expected": "Ich möchte mein Fahrrad abholen."
+},
+{
+"id": "r6-n4",
+"style": "neutral",
+"segs": [
+"Ich kaufe einen Hund, nein, eine Katze."
+],
+"expected": "Ich kaufe eine Katze."
+},
+{
+"id": "r6-n5",
+"style": "neutral",
+"segs": [
+"Wir treffen uns nicht vor 8 Uhr, nein, nicht vor 9 Uhr."
+],
+"expected": "Wir treffen uns nicht vor 9 Uhr."
+},
+{
+"id": "r6-d1",
+"style": "neutral",
+"segs": [
+"Treffen am 3.10. um 10:00."
+],
+"expected": "Treffen am 3.10. um 10:00."
+},
+{
+"id": "r6-q1",
+"style": "neutral",
+"segs": [
+"Er hat gesagt, nein, das geht nicht."
+],
+"expected": "Er hat gesagt, nein, das geht nicht."
 }
 ]
