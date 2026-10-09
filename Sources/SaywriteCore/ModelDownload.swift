@@ -97,6 +97,8 @@ public enum ModelDownloadError: Error, Equatable, Sendable {
     case incomplete
     /// The file does not have the pinned hash. The partial file has been deleted.
     case hashMismatch
+    /// The server answered with something that cannot be the model (an HTML page, a wrong size). The partial file has been deleted.
+    case unexpectedResponse
     case network(String)
 }
 
@@ -108,6 +110,7 @@ extension ModelDownloadError: LocalizedError {
         case .http(let status): return "The server answered with status \(status)"
         case .incomplete: return "The download was interrupted"
         case .hashMismatch: return "The downloaded file is corrupted"
+        case .unexpectedResponse: return "The server did not send the model file"
         case .network(let message): return message
         }
     }
@@ -184,7 +187,13 @@ public final class ModelDownloader: @unchecked Sendable {
             }
 
             if offset < spec.size {
-                let outcome = try await transfer(from: offset, part: part, hasher: &hasher, onPhase: onPhase)
+                let outcome: Outcome
+                do {
+                    outcome = try await transfer(from: offset, part: part, hasher: &hasher, onPhase: onPhase)
+                } catch ModelDownloadError.unexpectedResponse {
+                    try? fm.removeItem(at: part)
+                    throw ModelDownloadError.unexpectedResponse
+                }
                 switch outcome {
                 case .done: break
                 case .restart:
@@ -318,12 +327,20 @@ private final class ChunkSink: NSObject, URLSessionDataDelegate, @unchecked Send
             }
             completionHandler(.allow)
         case 200:
+            let type = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+            let length = http.value(forHTTPHeaderField: "Content-Length").flatMap { Int64($0) }
+            if type.contains("text/html") || (length != nil && length != total) {
+                // A captive portal or an error page, not the model.
+                verdict = .failed(.unexpectedResponse)
+                completionHandler(.cancel)
+                return
+            }
             if startOffset > 0 {
-                // Range ignored: the body is the whole file again. Start the file and the hash over.
-                try? handle?.truncate(atOffset: 0)
-                try? handle?.seek(toOffset: 0)
-                hasher = SHA256()
-                written = 0
+                // Range ignored: the body is the whole file again. Start over without Range, which also
+                // checks the disk space for the whole file.
+                verdict = .restart
+                completionHandler(.cancel)
+                return
             }
             completionHandler(.allow)
         case 416:
@@ -336,6 +353,12 @@ private final class ChunkSink: NSObject, URLSessionDataDelegate, @unchecked Send
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        if written + Int64(data.count) > total {
+            // More than the model: never write without limit.
+            verdict = .failed(.unexpectedResponse)
+            dataTask.cancel()
+            return
+        }
         do {
             try handle?.write(contentsOf: data)
         } catch {

@@ -123,6 +123,28 @@ public actor LlamaEngine {
         pressureSource = nil
     }
 
+    /// Unloads the model and then runs `body` (which deletes the model file) in the same actor step,
+    /// so no request can load the file in between. A prewarm queued after this finds no file.
+    public func unloadThenRun(_ body: @Sendable () -> Void) {
+        unload()
+        body()
+    }
+
+    private nonisolated let pending = PendingLoad()
+
+    /// Starts loading in the background, or returns the load that is already running, so a burst of
+    /// requests while the model loads shares one load.
+    public nonisolated func startLoading(modelURL: URL, language: DictationLanguage, forRewrite: Bool) -> Task<Void, Never> {
+        pending.lock.lock(); defer { pending.lock.unlock() }
+        if let task = pending.task { return task }
+        let task = Task.detached { [self] in
+            await prewarm(modelURL: modelURL, language: language, forRewrite: forRewrite)
+            pending.clear()
+        }
+        pending.task = task
+        return task
+    }
+
     /// Frees the model before the process exits, blocking the caller for at most `timeout` seconds.
     /// ggml asserts in a static destructor when a Metal model is still alive at exit.
     public nonisolated func shutdown(timeout: TimeInterval = 3) {
@@ -136,7 +158,9 @@ public actor LlamaEngine {
         let timer = IdleTimer(delay: Self.idleSeconds) { [weak self] in await self?.unloadIfIdle() }
         idleTimer = timer
         timer.touch()
-        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .global(qos: .utility))
+        // Only .critical: loading the 2 GB model can itself raise a warning on an 8 GB Mac, and
+        // unloading on that would make every dictation reload the model.
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.critical], queue: .global(qos: .utility))
         source.setEventHandler { [weak self] in
             // Runs after a request in progress: the actor never frees a model that is in use.
             Task { await self?.unload() }
@@ -257,4 +281,10 @@ final class LockedFlag: @unchecked Sendable {
         get { lock.lock(); defer { lock.unlock() }; return stored }
         set { lock.lock(); stored = newValue; lock.unlock() }
     }
+}
+
+final class PendingLoad: @unchecked Sendable {
+    let lock = NSLock()
+    var task: Task<Void, Never>?
+    func clear() { lock.lock(); task = nil; lock.unlock() }
 }

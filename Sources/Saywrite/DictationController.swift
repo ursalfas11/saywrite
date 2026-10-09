@@ -234,8 +234,7 @@ final class DictationController {
         let store = modelStore
         state.builtinState = .notDownloaded
         Task {
-            await LlamaEngine.shared.unload()
-            store.delete(spec)
+            await LlamaEngine.shared.unloadThenRun { store.delete(spec) }
         }
     }
 

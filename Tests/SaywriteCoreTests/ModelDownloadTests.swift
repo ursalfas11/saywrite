@@ -176,6 +176,53 @@ final class ModelDownloadTests: XCTestCase {
         XCTAssertNil(StubURLProtocol.recorded[1].value(forHTTPHeaderField: "Range"))
     }
 
+    func testHtmlAnswerIsRejectedAndPartDeleted() async throws {
+        StubURLProtocol.reset { _ in .init(headers: ["Content-Type": "text/html"], body: Data("<html>portal</html>".utf8)) }
+        do {
+            _ = try await downloader().run()
+            XCTFail("html is not the model")
+        } catch let error as ModelDownloadError {
+            XCTAssertEqual(error, .unexpectedResponse)
+        }
+        XCTAssertEqual(ModelStore(directory: directory).status(spec), .missing)
+    }
+
+    func testWrongContentLengthIsRejected() async throws {
+        StubURLProtocol.reset { [payload] _ in .init(headers: ["Content-Length": "\(payload.count - 10)"], body: payload.prefix(payload.count - 10)) }
+        do {
+            _ = try await downloader().run()
+            XCTFail("wrong size")
+        } catch let error as ModelDownloadError {
+            XCTAssertEqual(error, .unexpectedResponse)
+        }
+        XCTAssertEqual(ModelStore(directory: directory).status(spec), .missing)
+    }
+
+    func testBodyLongerThanTheModelIsCut() async throws {
+        StubURLProtocol.reset { [payload] _ in .init(body: payload + Data(repeating: 0, count: 5_000)) }
+        do {
+            _ = try await downloader().run()
+            XCTFail("too long")
+        } catch let error as ModelDownloadError {
+            XCTAssertEqual(error, .unexpectedResponse)
+        }
+        XCTAssertEqual(ModelStore(directory: directory).status(spec), .missing)
+    }
+
+    func testIgnoredRangeRechecksDiskSpaceForTheWholeFile() async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try payload.prefix(4_000).write(to: ModelStore(directory: directory).partURL(spec))
+        StubURLProtocol.reset { [payload] _ in .init(status: 200, body: payload) }
+        // Room for the remainder only, not for a full restart.
+        let room = Int64(payload.count - 4_000) + ModelDownloader.diskMargin + 100
+        do {
+            _ = try await downloader(space: room).run()
+            XCTFail("no room for the whole file")
+        } catch let error as ModelDownloadError {
+            guard case .notEnoughDiskSpace = error else { return XCTFail("\(error)") }
+        }
+    }
+
     func testServerErrorIsReported() async throws {
         StubURLProtocol.reset { _ in .init(status: 503) }
         do {
