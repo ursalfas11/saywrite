@@ -298,9 +298,15 @@ public actor DictationSession {
         completed.removeAll()
     }
 
+    /// The corrected numbers and words must be in the result, otherwise the model kept the old version
+    /// ("am Montag nein am Dienstag" -> "am Montag" is refused). Word forms may change ("komme"/"kommen").
     static func keepsCorrectedNumbers(_ input: String, _ output: String, _ language: DictationLanguage) -> Bool {
         let outputNumbers = Set(output.split(whereSeparator: { !$0.isNumber }).map(String.init))
-        return CleanupGate.correctedNumbers(in: input, language: language).allSatisfy(outputNumbers.contains)
+        guard CleanupGate.correctedNumbers(in: input, language: language).allSatisfy(outputNumbers.contains) else { return false }
+        let outputWords = LLMOutputGuard.words(output)
+        return CleanupGate.correctedWords(in: input, language: language).allSatisfy { word in
+            outputWords.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
+        }
     }
 
     /// "Ich komme um fünf." + "Nein, um sechs." or "am Donnerstag" + "nein, am Freitag".

@@ -23,6 +23,8 @@ public enum CleanupGate {
     static let correctionPatterns: [String] = [
         #"[\p{L}\p{N}],\s*(?:(?:also|oder|ach)\s+)?(?:nein|nee|ne)(?:\s+warte)?\s*,\s*"# + notACorrection + #"\S"#,
         #",\s*ich mein(?:e|te)?\b(?!\s+(?:das|es)\s+(?:ernst|so)\b)"#,
+        // The recognizer often sets the comma only after the marker: "… bauen ich meine, ich will …".
+        #"[\p{L}\p{N}]\s+ich mein(?:e|te)\s*,\s*(?!(?:dass|ob|das|es)\b)\S"#,
         #",\s*besser gesagt\b"#,
         #",\s*oder besser\b"#,
         #",\s*moment\s*,"#,
@@ -70,6 +72,7 @@ public enum CleanupGate {
     static let englishCorrectionPatterns: [String] = [
         #"[\p{L}\p{N}],\s*(?:(?:oh|or)\s+)?no(?:\s+wait)?\s*,\s*"# + englishNotACorrection + #"\S"#,
         #",\s*i mean\b(?!\s*,?\s*(?:it|that|this|we|i|you|they|he|she|seriously|honestly|really|come on)\b)"#,
+        #"[\p{L}\p{N}]\s+i mean\s*,\s*(?!(?:it|that|this|seriously|honestly|really|come on)\b)\S"#,
         #",\s*or rather\b"#,
         #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
         #",\s*make (?:that|it)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|ten)\b"#,
@@ -95,6 +98,29 @@ public enum CleanupGate {
     /// Numbers spoken after the last correction marker: the corrected values that must survive
     /// ("2 bottles, wait, 3 bottles" -> "3").
     public static func correctedNumbers(in text: String, language: DictationLanguage) -> [String] {
+        guard let tail = correctedTail(in: text, language: language) else { return [] }
+        return tail.split(whereSeparator: { !$0.isNumber }).map(String.init)
+    }
+
+    /// Short and function words that a correct result may drop or change around the new version.
+    static let fillerWords: Set<String> = [
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "und", "oder", "aber",
+        "doch", "noch", "mal", "dann", "also", "bitte", "nein", "nee", "meine", "meinte", "warte", "moment",
+        "besser", "gesagt", "sorry", "the", "and", "but", "then", "please", "mean", "meant", "wait", "rather",
+        "actually", "scratch", "that", "make", "just", "only", "instead", "nur", "lieber", "eher", "stattdessen",
+    ]
+
+    /// The content words after the last correction marker: the new version that must survive
+    /// ("am Montag nein am Dienstag" -> ["dienstag"]). A result without them kept the old version.
+    public static func correctedWords(in text: String, language: DictationLanguage) -> [String] {
+        guard let tail = correctedTail(in: text, language: language) else { return [] }
+        return tail.split(whereSeparator: { $0.isWhitespace })
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count >= 3 && !fillerWords.contains($0) && !$0.allSatisfy(\.isNumber) }
+    }
+
+    /// The lowercased text from the last correction marker on, nil without one.
+    static func correctedTail(in text: String, language: DictationLanguage) -> Substring? {
         let lower = text.lowercased()
         let patterns = (language == .english ? englishCorrectionPatterns + englishLeadingPatterns : correctionPatterns + leadingPatterns)
         var lastEnd: String.Index?
@@ -105,11 +131,10 @@ public enum CleanupGate {
                 if lastEnd == nil || range.upperBound > lastEnd! { lastEnd = range.upperBound }
             }
         }
-        guard let lastEnd else { return [] }
+        guard let lastEnd else { return nil }
         // Start right after the marker word itself, so the number that belongs to the new version counts.
         let start = lower.index(lastEnd, offsetBy: -1, limitedBy: lower.startIndex) ?? lastEnd
-        let tail = lower[start...]
-        return tail.split(whereSeparator: { !$0.isNumber }).map(String.init)
+        return lower[start...]
     }
 
     static let maxWordsWithoutPunctuation = 25
