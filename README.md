@@ -156,7 +156,7 @@ Everything else is in the menu bar icon → **Settings**: keys, microphone, lang
 
 - **Bigger model for rewriting:** choose, for example, `qwen2.5:7b` under *Model (rewrite)* if you have the RAM. Dictation cleanup stays on the small, fast model.
 - **Less AI in an app:** set that app to *Casual*, which uses AI only for explicit self-corrections, or switch AI off entirely in the menu.
-- **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call. The log contains your dictated text, so delete it when you are done.
+- **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call, without your dictated text (only its length). Add `SAYWRITE_DEBUG_TEXT=1` to log the text as well; that log contains your dictations, so delete it when you are done.
 
 ## Development
 
