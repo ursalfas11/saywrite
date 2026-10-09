@@ -72,8 +72,8 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 
 | Test set | Cases | Exactly right |
 |---|---|---|
-| English | 131 | ~95 % |
-| German | 122 | ~92 % |
+| English | 135 | ~95 % |
+| German | 124 | ~91 % |
 
 The sets cover everyday messages, e-mails, self-corrections of many shapes, sentences that must not change, numbers, dates, URLs, math, spoken commands and all three styles.
 
