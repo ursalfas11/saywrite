@@ -15,7 +15,15 @@ jobs:
       - name: Unit tests
         run: swift test
       - name: Build the app
-        run: swift build -c release --product Saywrite
+        run: make app DEVELOPER_DIR="$(xcode-select -p)"
+      - name: Pack the app
+        # ditto keeps the bundle's permissions and signature; upload-artifact alone would drop the executable bit.
+        run: ditto -c -k --keepParent build/Saywrite.app build/Saywrite.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Saywrite
+          path: build/Saywrite.zip
+          retention-days: 30
       - name: Rules-only eval (no LLM on the runner, informational)
         run: |
           swift run -c release SaywriteEval Tests/Eval/cases.json --no-ai | tail -1

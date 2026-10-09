@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+      - name: Tag matches the app version
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Support/Info.plist)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match CFBundleShortVersionString $version in Support/Info.plist"
+            exit 1
+          fi
+      - name: Unit tests
+        run: swift test
+      - name: Build the app
+        run: make app DEVELOPER_DIR="$(xcode-select -p)"
+      - name: Pack the app
+        run: |
+          ditto -c -k --keepParent build/Saywrite.app "build/Saywrite-$GITHUB_REF_NAME.zip"
+          cd build && shasum -a 256 "Saywrite-$GITHUB_REF_NAME.zip" > "Saywrite-$GITHUB_REF_NAME.zip.sha256"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "build/Saywrite-$GITHUB_REF_NAME.zip" "build/Saywrite-$GITHUB_REF_NAME.zip.sha256" --title "Saywrite $GITHUB_REF_NAME" --generate-notes
