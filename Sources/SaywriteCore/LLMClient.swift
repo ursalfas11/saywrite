@@ -6,6 +6,8 @@ public enum LLMError: Error, Equatable, Sendable {
     case http(Int)
     case badResponse
     case rejectedOutput
+    /// The selection does not fit the model's context (the built-in model has 4096 tokens).
+    case tooLong
 }
 
 /// A language model that can clean up dictations and rewrite selections.
@@ -290,7 +292,8 @@ public enum LLMOutputGuard {
         // each marker must survive in order ("Bring bitte 2 Flaschen, Moment, 3 Flaschen" keeps "Bring").
         // Checked per marker, so a second correction in the same text does not demand the old version of the first.
         for (offset, segment) in split.segments.dropLast().enumerated() {
-            // The start is what a model drops: two words are enough to tell.
+            // The start is what a model drops: two words are enough to tell (where the new version replaces the old one is not known, so more would reject
+            // "Ruf mich morgen an, nein, übermorgen" for dropping "morgen").
             // A longer new version still must not swallow the first word of a segment that has more
             // than one ("Übersetze das ins Englische, nein, ins Französische: Guten Morgen").
             let keepCount = min(2, max(segment.count > 1 ? 1 : 0, segment.count - split.segments[offset + 1].count))
@@ -302,6 +305,10 @@ public enum LLMOutputGuard {
                 position = index + 1
             }
         }
+        // The new version stays nearly whole: one dropped content word is a filler ("natürlich"), two or more
+        // change the meaning ("..., ich meine, dass wir es annehmen sollten" -> "..., annehmen sollten").
+        let lostTail = split.tail.filter { $0.count >= 4 && !has($0, in: outputWords) }
+        if lostTail.count >= 2 { return false }
         // The end of the new version stays ("… 3 Flaschen Wasser mit": "mit" is not dropped).
         if let last = split.tail.last, !has(last, in: outputWords) { return false }
         return true

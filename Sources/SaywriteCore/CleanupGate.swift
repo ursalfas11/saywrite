@@ -27,7 +27,8 @@ public enum CleanupGate {
     static let quoteVerbs = #"(?:sagte|sagt|sagen|gesagt|antwortete|antwortet|geantwortet|meinte|gemeint|fragte|fragt|gefragt|rief|gerufen|schrieb|geschrieben|erwiderte|erwidert|dachte|gedacht|denkt)"#
 
     static let correctionPatterns: [String] = [
-        #"[\p{L}\p{N}]"# + afterOpener + #",\s*(?:(?:also|oder|ach)\s+)?(?:(?:nein|nee|ne)\s*,\s*"# + notACorrection
+        // A symbol or the period of an ordinal or date may stand before the comma: "5 €, nein, 6 €", "am 12., nein, am 13.".
+        #"(?:[\p{L}\p{N}€$£%]|\d\.)"# + afterOpener + #",\s*(?:(?:also|oder|ach)\s+)?(?:(?:nein|nee|ne)\s*,\s*"# + notACorrection
             + #"|(?:nein|nee|ne)\s+warte\s*,\s*"# + notAnAnswer + #")\S"#,
         // "Der Termin ist am Dienstag, nein, es ist Mittwoch": a pronoun after the marker starts the new
         // clause, unless the clause before is a quotation ("Er sagte, nein, das mache ich nicht").
@@ -38,7 +39,7 @@ public enum CleanupGate {
         #"\b(ein|kein|mein|dein|sein|unser|euer)(?:e|en|em|er|es)?\s+[^.!?,]{1,40}?,\s*(?:oder\s+)?(?:nein|nee|ne)\s*,\s*\1(?:e|en|em|er|es)?\s+\S"#,
         // "nicht vor 8 Uhr, nein, nicht vor 9 Uhr": the negation or a number comes back.
         #"(?:\bnicht\b|\d|\b(?:null|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\b)[^.!?,]*,\s*(?:oder\s+)?(?:nein|nee|ne)\s*,\s*nicht\s+\S"#,
-        #",\s*ich mein(?:e|te)?\b(?!\s+(?:das|es)\s+(?:ernst|so)\b)"#,
+        #",\s*ich mein(?:e|te)?\b(?!\s+(?:das|es)\s+(?:ernst|so)\b)(?!\s*,\s*(?:dass|ob|das|es|er|sie|wir|man)\b)"#,
         // The recognizer often sets the comma only after the marker: "… bauen ich meine, ich will …".
         #"[\p{L}\p{N}]\s+ich mein(?:e|te)\s*,\s*(?!(?:dass|ob|das|es)\b)\S"#,
         #",\s*besser gesagt\b"#,
@@ -152,7 +153,7 @@ public enum CleanupGate {
     static let englishQuoteVerbs = #"(?:said|says|say|replied|answered|asked|thought|wrote|told|shouted)"#
 
     static let englishCorrectionPatterns: [String] = [
-        #"[\p{L}\p{N}]"# + englishAfterOpener + #",\s*(?:(?:oh|or)\s+)?(?:no\s*,\s*"# + englishNotACorrection
+        #"(?:[\p{L}\p{N}€$£%]|\d\.)"# + englishAfterOpener + #",\s*(?:(?:oh|or)\s+)?(?:no\s*,\s*"# + englishNotACorrection
             + #"|no\s+wait\s*,\s*"# + englishNotAnAnswer + #")\S"#,
         // "The deadline is Friday, no, it's Thursday": a pronoun after the marker starts the new clause,
         // unless the clause before is a quotation ("He said, no, I won't").
