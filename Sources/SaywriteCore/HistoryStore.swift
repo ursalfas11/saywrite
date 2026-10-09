@@ -72,11 +72,17 @@ public final class HistoryStore: @unchecked Sendable {
 
     private func save(_ items: [DictationResult]) {
         do {
-            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // Dictations can be private: readable by this user only, from the first byte on.
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let data = try JSONEncoder.history.encode(items)
-            try data.write(to: fileURL, options: .atomic)
-            // Dictations can be private: readable by this user only.
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            let temp = fileURL.appendingPathExtension("tmp")
+            try? FileManager.default.removeItem(at: temp)
+            guard FileManager.default.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+                return
+            }
+            // rename(2) replaces the old file atomically and keeps the mode of the temporary one.
+            if rename(temp.path, fileURL.path) != 0 { try? FileManager.default.removeItem(at: temp) }
         } catch {
             // History is a convenience; failing to save must never break dictation.
         }

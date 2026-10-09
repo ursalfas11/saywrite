@@ -379,8 +379,11 @@ private final class ChunkSink: NSObject, URLSessionDataDelegate, @unchecked Send
         if let verdict { finish(verdict); return }
         if let error {
             if (error as? URLError)?.code == .cancelled { finish(.cancelled); return }
-            // A dropped connection keeps the partial file: the next run resumes.
-            finish(.failed(written > 0 ? .incomplete : .network(error.localizedDescription)))
+            // A dropped connection keeps the partial file: the next run resumes. Only bytes of this run count,
+            // and a TLS or certificate failure is shown as it is, not as an interruption to retry.
+            let code = (error as? URLError)?.code
+            let tlsFailure = code.map { $0.rawValue <= URLError.secureConnectionFailed.rawValue && $0.rawValue >= URLError.clientCertificateRequired.rawValue } ?? false
+            finish(.failed(written > startOffset && !tlsFailure ? .incomplete : .network(error.localizedDescription)))
             return
         }
         finish(.finished)
