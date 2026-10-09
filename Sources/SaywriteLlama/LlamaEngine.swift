@@ -101,7 +101,7 @@ public actor LlamaEngine {
             let user = forRewrite
                 ? Prompts.rewriteUser(selection: "Hallo.", instruction: "kürzer", language: language)
                 : Prompts.cleanupUser(text: "Hallo.", language: language)
-            _ = try generate(system: system, user: user, maxTokens: 1, abort: AbortFlag())
+            _ = try generate(system: system, user: user, maxTokens: 1, abort: AbortFlag(), requireFinished: false)
         } catch {
             Debug.log("built-in model prewarm failed: \(error)")
         }
@@ -179,7 +179,9 @@ public actor LlamaEngine {
     // MARK: - Generation
 
     /// Answers one chat request. Throws `LLMError.timeout` when `abort` is set or the task is cancelled.
-    public func generate(system: String, user: String, maxTokens: Int, abort: AbortFlag) throws -> String {
+    /// `requireFinished: false` is for the prewarm only: it wants the decoded prompt in the cache and
+    /// throws the one sampled token away, so a cut-off answer is not an error there.
+    public func generate(system: String, user: String, maxTokens: Int, abort: AbortFlag, requireFinished: Bool = true) throws -> String {
         guard let context, let vocab else { throw LLMError.unreachable }
         if abort.isSet || Task.isCancelled { throw LLMError.timeout }
         abortBox.flag = abort
@@ -228,7 +230,7 @@ public actor LlamaEngine {
                 if status != 0 { throw decodeFailure(abort) }
             }
             // An answer cut off by the token or context limit must not replace a selection (the catch clears the cache).
-            guard finished else { throw LLMError.rejectedOutput }
+            guard finished || !requireFinished else { throw LLMError.rejectedOutput }
             // Keep the prompt, drop the answer.
             _ = llama_memory_seq_rm(memory, 0, Int32(tokens.count), -1)
             return String(decoding: bytes, as: UTF8.self)
