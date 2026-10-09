@@ -291,7 +291,9 @@ public enum LLMOutputGuard {
         // Checked per marker, so a second correction in the same text does not demand the old version of the first.
         for (offset, segment) in split.segments.dropLast().enumerated() {
             // The start is what a model drops: two words are enough to tell.
-            let keepCount = min(2, max(0, segment.count - split.segments[offset + 1].count))
+            // A longer new version still must not swallow the first word of a segment that has more
+            // than one ("Übersetze das ins Englische, nein, ins Französische: Guten Morgen").
+            let keepCount = min(2, max(segment.count > 1 ? 1 : 0, segment.count - split.segments[offset + 1].count))
             var position = 0
             // A number the next version replaces ("Two coffees, make that three") may be gone.
             let replacesNumber = split.segments[offset + 1].contains(where: isNumber)
