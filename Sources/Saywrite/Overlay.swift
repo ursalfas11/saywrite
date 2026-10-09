@@ -11,7 +11,7 @@ enum OverlayState: Equatable {
 
 @MainActor
 final class OverlayModel: ObservableObject {
-    static let dotCount = 15
+    static let dotCount = 11
     @Published var state: OverlayState = .hidden
     @Published var levels: [Float] = Array(repeating: 0, count: OverlayModel.dotCount)
     /// Finished, cleaned text of this dictation so far.
@@ -47,7 +47,7 @@ final class OverlayController {
 
     init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 116),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 72),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: true)
         panel.isFloatingPanel = true
@@ -130,9 +130,6 @@ final class OverlayController {
 
 private enum Palette {
     static let background = Color(red: 0.04, green: 0.04, blue: 0.05)
-    static let divider = Color.white.opacity(0.14)
-    static let text = Color.white.opacity(0.94)
-    static let partial = Color.white.opacity(0.5)
     static let record = Color(red: 0.90, green: 0.29, blue: 0.27)
     static let rewrite = Color(red: 0.58, green: 0.50, blue: 1.0)
     static let busy = Color(red: 0.45, green: 0.72, blue: 1.0)
@@ -157,68 +154,24 @@ struct OverlayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// One compact row: no live transcript, the words appear where they are inserted.
     private var card: some View {
-        VStack(spacing: 0) {
-            transcript
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
-                .frame(maxWidth: .infinity, minHeight: 38, alignment: .topLeading)
-            Rectangle().fill(Palette.divider).frame(height: 1)
-            controls
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-        }
-        .frame(width: 360)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Palette.background.opacity(0.96))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
-        )
-        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
-        .onTapGesture { if case .error = model.state { onErrorTap() } }
-    }
-
-    // MARK: Transcript
-
-    @ViewBuilder
-    private var transcript: some View {
-        switch model.state {
-        case .error(let message):
-            Text(message)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(2)
-                .foregroundStyle(Palette.text)
-        default:
-            if model.committedText.isEmpty && model.partialText.isEmpty {
-                Text(placeholder)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.partial)
-            } else {
-                (Text(model.committedText).foregroundStyle(Palette.text)
-                    + Text(spacer + model.partialText).foregroundStyle(Palette.partial))
-                    .font(.system(size: 13))
-                    .lineLimit(2)
-                    .truncationMode(.head)
-                    .animation(.easeOut(duration: 0.15), value: model.partialText)
-            }
-        }
+        controls
+            .padding(.horizontal, 8)
+            .frame(height: 34)
+            .frame(maxWidth: 340)
+            .fixedSize()
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Palette.background.opacity(0.96))
+                    .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+            )
+            .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+            .onTapGesture { if case .error = model.state { onErrorTap() } }
     }
 
     private var processingLabel: String {
         model.isRewrite ? L("Rewriting…", "Formuliere um …") : L("Inserting…", "Wird eingefügt …")
-    }
-
-    private var spacer: String {
-        model.committedText.isEmpty || model.partialText.isEmpty ? "" : " "
-    }
-
-    private var placeholder: String {
-        switch model.state {
-        case .recording(_, true): return L("Say what should happen to the selected text…", "Sag, was mit dem markierten Text passieren soll …")
-        case .recording: return L("Listening…", "Sprich jetzt …")
-        default: return ""
-        }
     }
 
     // MARK: Controls
@@ -229,33 +182,29 @@ struct OverlayView: View {
         case .hidden:
             EmptyView()
         case .recording(_, let rewrite):
-            HStack {
+            HStack(spacing: 10) {
                 StopButton(color: rewrite ? Palette.rewrite : Palette.record, action: onStop)
-                Spacer()
                 DotMeter(levels: model.levels)
-                Spacer()
                 Image(systemName: rewrite ? "wand.and.stars" : "mic.fill")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 22)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(rewrite ? Palette.rewrite : .white.opacity(0.9))
+                    .frame(width: 18)
+                    .help(rewrite
+                        ? L("Say what should happen to the selected text", "Sag, was mit dem markierten Text passieren soll")
+                        : L("Listening", "Hört zu"))
             }
         case .processing:
-            HStack {
-                ProcessingDots(color: Palette.busy).frame(width: 22)
-                Spacer()
+            HStack(spacing: 8) {
+                ProcessingDots(color: Palette.busy)
                 statusLabel(processingLabel)
-                Spacer()
-                Color.clear.frame(width: 22)
             }
+            .padding(.horizontal, 4)
         case .done(let summary, let undo):
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .foregroundStyle(Palette.success)
-                    .frame(width: 22)
-                Spacer()
-                statusLabel(summary)
-                Spacer()
+                if !summary.isEmpty { statusLabel(summary) }
                 if undo {
                     Button(action: onUndo) {
                         Label(L("Original", "Original"), systemImage: "arrow.uturn.backward")
@@ -267,30 +216,27 @@ struct OverlayView: View {
                     }
                     .buttonStyle(.plain)
                     .help(L("Insert the text without AI changes", "Text ohne KI-Änderungen einfügen"))
-                } else {
-                    Color.clear.frame(width: 22)
                 }
             }
-        case .error:
-            HStack {
+            .padding(.horizontal, 4)
+        case .error(let message):
+            HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundStyle(Palette.warning)
-                    .frame(width: 22)
-                Spacer()
-                statusLabel(model.errorActionable ? L("Click to open the setting", "Klicken, um die Einstellung zu öffnen") : "")
-                Spacer()
-                Color.clear.frame(width: 22)
+                statusLabel(message)
             }
+            .padding(.horizontal, 4)
+            .help(model.errorActionable ? L("Click to open the setting", "Klicken, um die Einstellung zu öffnen") : "")
         }
     }
 
     private func statusLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .medium, design: .rounded))
-            .foregroundStyle(.white.opacity(0.75))
+            .foregroundStyle(.white.opacity(0.85))
             .lineLimit(1)
-            .minimumScaleFactor(0.75)
+            .truncationMode(.tail)
     }
 }
 
@@ -302,10 +248,10 @@ private struct StopButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(color).frame(width: 22, height: 22)
+                Circle().fill(color).frame(width: 20, height: 20)
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(.white)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 7, height: 7)
             }
             .scaleEffect(hovering ? 1.08 : 1)
         }
@@ -324,10 +270,10 @@ private struct DotMeter: View {
                 let level = CGFloat(levels[index])
                 Capsule()
                     .fill(Color.white.opacity(0.55 + 0.45 * level))
-                    .frame(width: 3, height: 3 + level * 12)
+                    .frame(width: 3, height: 3 + level * 11)
             }
         }
-        .frame(height: 16)
+        .frame(height: 14)
         .animation(.easeOut(duration: 0.08), value: levels)
     }
 }

@@ -296,13 +296,10 @@ final class DictationController {
         if settings.playSounds { sounds.playStart() }
     }
 
-    /// Shows what is being said while recording: finished segments in their cleaned form, plus a
-    /// quick transcript of the recent audio since the last pause. Also stops forgotten recordings.
+    /// Watches a running recording and stops a forgotten one after a long silence or at the maximum
+    /// length. The panel shows no live transcript, so nothing is transcribed here.
     private func startPreview(session: DictationSession, segmenter: Segmenter, id: UUID) {
-        let transcriber = self.transcriber
         previewTask = Task { [weak self] in
-            var lastTotal = 0
-            var partial = ""
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 450_000_000)
                 guard !Task.isCancelled, let self, self.sessionID == id, case .recording(let action) = self.phase else { return }
@@ -314,19 +311,6 @@ final class DictationController {
                     self.requestFinish(action)
                     return
                 }
-
-                let committed = await session.previewText()
-                let open = await segmenter.openAudio()
-                if open.totalCount < 8_000 {
-                    partial = ""
-                } else if open.totalCount != lastTotal, await segmenter.isSpeaking {
-                    // Only re-transcribe while speech is going on; silence changes nothing.
-                    lastTotal = open.totalCount
-                    partial = (try? await transcriber.transcribe(open.samples)) ?? partial
-                }
-                guard !Task.isCancelled, self.sessionID == id, case .recording = self.phase else { return }
-                self.overlay.model.committedText = committed
-                self.overlay.model.partialText = partial
             }
         }
     }

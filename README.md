@@ -17,7 +17,7 @@ Local, instant AI dictation for macOS that only lets AI touch your words when th
 ![Swift 6](https://img.shields.io/badge/Swift-6-orange?logo=swift)
 ![100% offline](https://img.shields.io/badge/offline-100%25-brightgreen)
 
-<img src="docs/images/overlay-recording.png" width="440" alt="Saywrite recorder panel with live transcript">
+<img src="docs/images/overlay-recording.png" width="440" alt="Saywrite recorder panel">
 
 </div>
 
@@ -44,7 +44,6 @@ Most dictation apps run every sentence you say through a language model. That is
 | | |
 |---|---|
 | **Tap or hold** | Tap right ⌥ to start, tap again to insert. Or hold it and release. **Esc** cancels. A soft sound marks start and stop. |
-| **Live transcript** | See your words while you speak. Finished parts are already shown cleaned up. |
 | **Self-corrections** | "I'll be there at 5, no, at 6" → *I'll be there at 6.* "We could order pizza. Actually, scratch that, let's cook." → *Let's cook.* This also works across a pause. |
 | **Rewrite by voice** | Select text, tap right ⌘ and say "more formal", "shorter" or "in German". |
 | **Style per app** | Casual in Messages, WhatsApp and Slack (no period after a single sentence), formal in Mail and Word ("gonna" → "going to"), neutral everywhere else. Fully configurable. |
