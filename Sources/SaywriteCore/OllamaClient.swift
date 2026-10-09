@@ -63,32 +63,15 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
     }
 
     public func cleanup(text: String, style: Style, language: DictationLanguage = .german) async throws -> String {
-        let output = try await chat(
-            system: Prompts.cleanupSystem(language),
-            user: Prompts.cleanupUser(text: text, language: language),
-            maxTokens: text.count / 2 + 64,
-            timeout: configuration.cleanupTimeout
-        )
-        guard let accepted = LLMOutputGuard.acceptCleanup(input: text, output: output, style: style) else {
-            throw LLMError.rejectedOutput
+        try await LLMRequests.cleanup(text: text, style: style, language: language) { system, user, maxTokens in
+            try await chat(system: system, user: user, maxTokens: maxTokens, timeout: configuration.cleanupTimeout)
         }
-        return accepted
     }
 
     public func rewrite(selection: String, instruction: String) async throws -> String {
-        let language = DictationLanguage.detect(selection) ?? DictationLanguage.detect(instruction) ?? .german
-        let output = try await chat(
-            system: Prompts.rewriteSystem(language),
-            user: Prompts.rewriteUser(selection: selection, instruction: instruction, language: language),
-            model: configuration.rewriteModel,
-            maxTokens: max(512, selection.count),
-            timeout: configuration.rewriteTimeout
-        )
-        guard !LLMOutputGuard.sanitize(output).isEmpty else { throw LLMError.badResponse }
-        guard let accepted = LLMOutputGuard.acceptRewrite(selection: selection, instruction: instruction, output: output) else {
-            throw LLMError.rejectedOutput
+        try await LLMRequests.rewrite(selection: selection, instruction: instruction) { system, user, maxTokens in
+            try await chat(system: system, user: user, model: configuration.rewriteModel, maxTokens: maxTokens, timeout: configuration.rewriteTimeout)
         }
-        return accepted
     }
 
     // MARK: - Status
@@ -200,7 +183,7 @@ public enum OllamaEndpoint {
 }
 
 /// Runs `operation` and throws `LLMError.timeout` if it does not finish within `seconds`.
-func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+public func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await operation() }
         group.addTask {
