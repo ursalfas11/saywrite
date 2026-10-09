@@ -2,7 +2,7 @@ import XCTest
 @testable import SaywriteCore
 
 /// Findings of review round 2.
-final class Round2Tests: XCTestCase {
+final class ReviewRound2FindingsTests: XCTestCase {
     override func setUp() { UILanguage.override = true }
     override func tearDown() { UILanguage.override = nil }
 
