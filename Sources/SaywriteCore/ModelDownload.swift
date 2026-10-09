@@ -357,7 +357,7 @@ private final class ChunkSink: NSObject, URLSessionDataDelegate, @unchecked Send
         if let error {
             if (error as? URLError)?.code == .cancelled { finish(.cancelled); return }
             // A dropped connection keeps the partial file: the next run resumes.
-            finish(.failed(written > startOffset || written > 0 ? .incomplete : .network(error.localizedDescription)))
+            finish(.failed(written > 0 ? .incomplete : .network(error.localizedDescription)))
             return
         }
         finish(.finished)

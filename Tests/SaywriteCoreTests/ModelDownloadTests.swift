@@ -44,6 +44,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             index = end
         }
         if answer.cutAfter != nil {
+            // Let the delegate see the bytes that did arrive before the connection drops.
+            Thread.sleep(forTimeInterval: 0.3)
             client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
         } else {
             client?.urlProtocolDidFinishLoading(self)
