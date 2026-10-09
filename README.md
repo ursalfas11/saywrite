@@ -17,7 +17,7 @@ Local, instant AI dictation for macOS that only lets AI touch your words when th
 ![Swift 6](https://img.shields.io/badge/Swift-6-orange?logo=swift)
 ![100% offline](https://img.shields.io/badge/offline-100%25-brightgreen)
 
-<img src="docs/images/overlay-recording.png" width="440" alt="Saywrite recorder panel">
+<img src="docs/images/overlay-recording.png" width="360" alt="Saywrite recorder pill: stop button, level meter, microphone">
 
 </div>
 
@@ -30,13 +30,13 @@ Most dictation apps run every sentence you say through a language model. That is
 - 💸 **Completely free.** No trial, no paywall, no "pro" tier, no account. Everything runs on your Mac, so there is nothing to pay for.
 - ⚡ **Text before you blink.** Saywrite transcribes and cleans up *while you are still talking*. When you tap the key to stop, the work is basically done: typically **about a quarter of a second from stop to text**, including AI corrections.
 - 🎯 **AI only where it is needed.** Every dictation gets instant, deterministic cleanup: filler words, stutters, capitalization, punctuation and spoken commands. The language model only sees the **sentence** that needs it (plus the one before, when you correct yourself across a pause). Everything else stays exactly as you said it.
-- 👀 **You always know what changed.** After every dictation the panel shows a summary like `2 filler words · AI: 1 correction`, and one click on **↩ Original** swaps in the version without AI.
+- 👀 **You always know what changed.** After every dictation the pill shows a summary like `2 filler words · AI: 1 correction`, and one click on **↩ Original** swaps in the version without AI.
 - 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model runs locally through Ollama. With the default Ollama address nothing leaves your Mac, and there is no telemetry. If you point Saywrite at an Ollama server elsewhere, the settings warn you that your dictations go there.
 - 🪶 **Light on memory.** Built for an 8 GB MacBook. The speech model lives on the Neural Engine, and the LLM is loaded when you start dictating and released after 15 idle minutes.
 - 🌍 **English and German**, with automatic language detection. The speech model understands 25 European languages.
 
 <div align="center">
-<img src="docs/images/overlay-done.png" width="440" alt="After inserting: summary of changes and Original button">
+<img src="docs/images/overlay-done.png" width="360" alt="After inserting: summary of changes and Original button">
 </div>
 
 ## Features
@@ -44,6 +44,7 @@ Most dictation apps run every sentence you say through a language model. That is
 | | |
 |---|---|
 | **Tap or hold** | Tap right ⌥ to start, tap again to insert. Or hold it and release. **Esc** cancels. A soft sound marks start and stop. |
+| **Out of the way** | While you speak, a small pill at the bottom of the screen shows only the stop button and your level. The words appear where they are inserted, not in a preview. |
 | **Self-corrections** | "I'll be there at 5, no, at 6" → *I'll be there at 6.* "We could order pizza. Actually, scratch that, let's cook." → *Let's cook.* This also works across a pause. |
 | **Rewrite by voice** | Select text, tap right ⌘ and say "more formal", "shorter" or "in German". |
 | **Style per app** | Casual in Messages, WhatsApp and Slack (no period after a single sentence), formal in Mail and Word ("gonna" → "going to"), neutral everywhere else. Fully configurable. |
@@ -143,7 +144,7 @@ On first launch Saywrite asks for **Microphone** and **Accessibility** access. A
 | Action | How |
 |---|---|
 | Dictate | Tap **right ⌥**, speak, tap again (or hold and release) |
-| Stop | Tap again, or click the red button in the panel |
+| Stop | Tap again, or click the red button in the pill |
 | Cancel | **Esc** |
 | Undo the AI | Click **↩ Original** right after inserting (offered in text fields where undo is reliable) |
 | Rewrite a selection | Select text, tap **right ⌘**, speak the instruction, tap again |
@@ -171,13 +172,13 @@ scripts/bench.sh            # latency benchmark with the real models, no microph
 | Path | What lives there |
 |---|---|
 | `Sources/SaywriteCore` | Platform-independent logic: language detection, rules, gate, sentence splitter, dictionary, change summary, Ollama client and output guards, dictation session, the tap-or-hold hotkey logic and the paste-target rules. Fully unit-tested. |
-| `Sources/Saywrite` | The macOS app: event tap, audio capture, VAD segmentation, Parakeet, text insertion (Accessibility queries run off the main thread, which also serves the event tap), recorder panel, sounds, settings. Not unit-tested; CI builds it. |
+| `Sources/Saywrite` | The macOS app: event tap, audio capture, VAD segmentation, Parakeet, text insertion (Accessibility queries run off the main thread, which also serves the event tap), recorder pill, sounds, settings. Not unit-tested; CI builds it. |
 | `Sources/SaywriteEval` | The quality evaluation runner. Cases live in `Tests/Eval`. |
 | `docs/superpowers/specs` | The design document and the decisions made while building it. |
 
 Useful hidden flags:
 - `Saywrite --selftest <wav> [casual|neutral|formal] [--no-ai]` runs a recording through the full pipeline.
-- `Saywrite --render-overlay <dir>` renders the panel states to PNG.
+- `Saywrite --render-overlay <dir>` renders the pill states to PNG (the images in `docs/images`).
 
 ## Roadmap
 
