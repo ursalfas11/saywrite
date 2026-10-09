@@ -58,7 +58,7 @@ public enum RuleCleaner {
         "z.", "b.", "z.b.", "d.", "h.", "d.h.", "u.", "a.", "u.a.", "usw.", "etc.", "ca.", "bzw.", "vgl.", "nr.", "dr.",
         "prof.", "evtl.", "ggf.", "inkl.", "zzgl.", "bspw.", "mio.", "mrd.", "std.", "min.", "max.", "str.", "tel.",
         "abs.", "art.", "bd.", "jh.", "o.", "ä.", "o.ä.", "s.", "sog.", "u.u.", "v.a.", "z.t.", "e.v.", "gmbh.", "hr.", "fr.",
-        "e.g.", "i.e.", "vs.", "mr.", "mrs.", "ms.", "no.", "approx.", "a.m.", "p.m.", "st.", "jr.", "sr.", "inc.", "ltd.",
+        "i.", "r.", "bzgl.", "mwst.", "ust.", "lt.", "abt.", "hrn.", "tsd.", "mo.", "di.", "mi.", "zt.", "nl.", "kfm.", "dipl.", "geb.", "gem.", "zw.", "e.g.", "i.e.", "vs.", "mr.", "mrs.", "ms.", "no.", "approx.", "a.m.", "p.m.", "st.", "jr.", "sr.", "inc.", "ltd.",
     ]
 
     /// Capitalized words that start a new sentence or a correction after a number ("um 5. Nein, um 6.",
@@ -156,8 +156,9 @@ public enum RuleCleaner {
             // Parakeet sometimes renders "ähm" as a lone capital M inside a sentence. Keep real letters:
             // "Größe M oder L", "M wie Martha", "Variante M ist günstiger". Only after a lowercase word
             // (verb, adverb) or a comma; a capitalized word before it is almost always a noun it labels.
+            // After a preposition or an ordering verb ("in M auf Lager", "nehme M") it is a size.
             result = result.replacingOccurrences(
-                of: #"((?<![\p{L}\p{N}-])\p{Ll}[\p{L}]*|,) (?<!(?i:größe|typ|klasse|buchstabe|gruppe|variante|modell|paket|stufe|format|version|kategorie|plan|set) )Mm?(?= \p{Ll})(?! (?:wie|oder|und)\b)"#,
+                of: #"((?<![\p{L}\p{N}-])(?!(?:in|von|auf|für|bei|ab|nur|mit|ohne|zu|bis|nach|an|um|aus|statt|gegen|als|nehme|nehmen|nimm|nehmt|brauche|brauchen|hätte|hätten|nenne|wähle|wählen|bestelle|bestellen|sowie|plus)\b)\p{Ll}[\p{L}]*|,) (?<!(?i:größe|typ|klasse|buchstabe|gruppe|variante|modell|paket|stufe|format|version|kategorie|plan|set) )Mm?(?= \p{Ll})(?! (?:wie|oder|und)\b)"#,
                 with: "$1", options: .regularExpression)
         }
         result = tidyAfterRemoval(result)
