@@ -247,3 +247,14 @@ final class PrivacyTests: XCTestCase {
         XCTAssertEqual(permissions, 0o600)
     }
 }
+
+final class OllamaSessionTests: XCTestCase {
+    func testClientsShareOneSession() {
+        // A session per client would leak its delegate and connection pool.
+        let a = Mirror(reflecting: OllamaClient(configuration: .init())).children.first { $0.label == "session" }?.value as? URLSession
+        let b = Mirror(reflecting: OllamaClient(configuration: .init())).children.first { $0.label == "session" }?.value as? URLSession
+        XCTAssertNotNil(a)
+        XCTAssertTrue(a === b)
+        XCTAssertTrue(a === OllamaClient.sharedSession)
+    }
+}

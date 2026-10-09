@@ -45,6 +45,8 @@ final class AppSettings: ObservableObject {
     @Published var llmTimeout: Double { didSet { defaults.set(llmTimeout, forKey: "llmTimeout") } }
     /// UID of the microphone, empty for the system default.
     @Published var inputDeviceUID: String { didSet { defaults.set(inputDeviceUID, forKey: "inputDeviceUID") } }
+    /// Keep recent dictations in a file on this Mac (for "Paste last" and the History tab).
+    @Published var keepHistory: Bool { didSet { defaults.set(keepHistory, forKey: "keepHistory") } }
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: "playSounds") } }
     @Published var replacements: [Replacement] {
         didSet { defaults.set(try? JSONEncoder().encode(replacements), forKey: "replacements") }
@@ -64,6 +66,7 @@ final class AppSettings: ObservableObject {
         let timeout = defaults.double(forKey: "llmTimeout")
         llmTimeout = timeout > 0 ? timeout : 4
         inputDeviceUID = defaults.string(forKey: "inputDeviceUID") ?? ""
+        keepHistory = defaults.object(forKey: "keepHistory") as? Bool ?? true
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
         if let data = defaults.data(forKey: "replacements"), let list = try? JSONDecoder().decode([Replacement].self, from: data) {
             replacements = list
@@ -77,9 +80,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// False when the typed address cannot be used and requests go to the local default instead.
+    var ollamaURLValid: Bool { OllamaEndpoint.parse(ollamaURL) != nil }
+
     var ollamaConfiguration: OllamaClient.Configuration {
         OllamaClient.Configuration(
-            baseURL: URL(string: ollamaURL) ?? URL(string: "http://localhost:11434")!,
+            baseURL: OllamaEndpoint.parse(ollamaURL) ?? URL(string: "http://localhost:11434")!,
             model: ollamaModel,
             rewriteModel: rewriteModel.trimmingCharacters(in: .whitespaces).isEmpty ? nil : rewriteModel,
             cleanupTimeout: llmTimeout

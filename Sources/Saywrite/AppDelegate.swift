@@ -38,6 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // A paste may still be waiting to give the user's clipboard back.
+        TextInserter.restorePendingClipboard()
+    }
+
     /// Accessibility can be granted at any time in System Settings; pick it up without a restart.
     private func watchPermissions() {
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -112,8 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func copyHistory(_ sender: NSMenuItem) {
         guard let text = sender.representedObject as? String else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        TextInserter.copy(text)
     }
 
     @objc private func pasteLast() {

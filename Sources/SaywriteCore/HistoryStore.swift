@@ -39,6 +39,22 @@ public final class HistoryStore: @unchecked Sendable {
         save(snapshot)
     }
 
+    /// Drops entries older than `interval`, so dictations do not stay on disk indefinitely.
+    public func removeOlder(than interval: TimeInterval, now: Date = Date()) {
+        lock.lock()
+        let kept = cache.filter { now.timeIntervalSince($0.date) <= interval }
+        let changed = kept.count != cache.count
+        cache = kept
+        lock.unlock()
+        if changed { save(kept) }
+    }
+
+    /// The text stored for a rewrite: only the instruction. The selected text is the user's own
+    /// document, not something Saywrite produced, and is never written to disk.
+    public static func rewriteRaw(instruction: String) -> String {
+        "[\(instruction)]"
+    }
+
     public func clear() {
         lock.lock()
         cache.removeAll()

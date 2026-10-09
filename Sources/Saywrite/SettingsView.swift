@@ -18,7 +18,7 @@ struct SettingsView: View {
                 .tabItem { Label(L("Styles", "Stile"), systemImage: "textformat") }
             DictionaryTab(settings: settings)
                 .tabItem { Label(L("Dictionary", "Wörterbuch"), systemImage: "character.book.closed") }
-            HistoryTab(state: state, controller: controller)
+            HistoryTab(settings: settings, state: state, controller: controller)
                 .tabItem { Label(L("History", "Verlauf"), systemImage: "clock") }
         }
         .padding(20)
@@ -146,6 +146,7 @@ private struct GeneralTab: View {
     let controller: DictationController
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var microphones = AudioDevices.inputs()
+    @State private var urlRefresh: Task<Void, Never>?
 
     private let languages: [(String, String)] = [
         ("auto", L("Automatic (German / English)", "Automatisch (Deutsch / Englisch)")),
@@ -156,6 +157,10 @@ private struct GeneralTab: View {
 
     /// Shown when the Ollama address points away from this Mac, where dictations would go.
     private var remoteOllamaWarning: String? {
+        guard settings.ollamaURLValid else {
+            return L("This address is not valid (use http://host:port): the local Ollama is used instead.",
+                     "Diese Adresse ist ungültig (http://Host:Port verwenden): es wird das lokale Ollama benutzt.")
+        }
         guard !settings.ollamaConfiguration.isLocal else { return nil }
         if settings.ollamaURL.lowercased().hasPrefix("https://") {
             return L("This address is not on this Mac: every dictation and selected text for rewriting is sent there.",
@@ -163,6 +168,11 @@ private struct GeneralTab: View {
         }
         return L("This address is not on this Mac: every dictation and selected text for rewriting is sent there unencrypted.",
                  "Diese Adresse liegt nicht auf diesem Mac: jedes Diktat und markierter Text zum Umformulieren gehen unverschlüsselt dorthin.")
+    }
+
+    private func refreshSystemState() {
+        microphones = AudioDevices.inputs()
+        launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
     var body: some View {
@@ -200,6 +210,8 @@ private struct GeneralTab: View {
             Section {
                 Toggle(L("Launch at login", "Beim Anmelden starten"), isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
+                        // Also fires when refreshSystemState() syncs the toggle; nothing to do then.
+                        guard (SMAppService.mainApp.status == .enabled) != enabled else { return }
                         do {
                             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
                         } catch {
@@ -215,7 +227,18 @@ private struct GeneralTab: View {
             }
             controller.applySettings()
         }
-        .onChange(of: settings.ollamaURL) { _, _ in Task { await controller.refreshOllamaStatus() } }
+        .onChange(of: settings.ollamaURL) { _, _ in
+            // Wait until typing pauses: no request per keystroke to half-typed addresses.
+            urlRefresh?.cancel()
+            urlRefresh = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                await controller.refreshOllamaStatus()
+            }
+        }
+        // The window is kept between openings: pick up new microphones and a changed login item.
+        .onAppear(perform: refreshSystemState)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in refreshSystemState() }
         .onChange(of: settings.rewriteKey) { _, _ in controller.applySettings() }
         .onChange(of: settings.language) { _, _ in controller.applySettings() }
         .onChange(of: settings.ollamaModel) { _, _ in Task { await controller.refreshOllamaStatus() } }
@@ -289,11 +312,17 @@ private struct StylesTab: View {
 // MARK: - History
 
 private struct HistoryTab: View {
+    @ObservedObject var settings: AppSettings
     @ObservedObject var state: AppState
     let controller: DictationController
 
     var body: some View {
         VStack(alignment: .leading) {
+            Toggle(L("Keep recent dictations on this Mac", "Letzte Diktate auf diesem Mac behalten"), isOn: $settings.keepHistory)
+                .onChange(of: settings.keepHistory) { _, keep in if !keep { controller.clearHistory() } }
+            Text(L("Stored unencrypted for 30 days at most, readable by your user only. A rewrite keeps only your spoken instruction, never the selected text.",
+                   "Unverschlüsselt gespeichert, höchstens 30 Tage, nur für deinen Benutzer lesbar. Bei einer Umformulierung bleibt nur die gesprochene Anweisung, nie der markierte Text."))
+                .font(.caption).foregroundStyle(.secondary)
             if state.history.isEmpty {
                 Spacer()
                 Text(L("No dictations yet.", "Noch keine Diktate.")).foregroundStyle(.secondary).frame(maxWidth: .infinity)
