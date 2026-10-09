@@ -97,7 +97,9 @@ public actor LlamaEngine {
     /// Loads the model and runs the constant system prompt of `language` through it, so the first
     /// real request only has the dictated text left to process. Does not throw: a missing model
     /// shows in the settings, and the dictation falls back to the rules.
-    public func prewarm(modelURL: URL, language: DictationLanguage, forRewrite: Bool) {
+    /// Returns whether the model could be loaded and run (it may be unloaded again right after).
+    @discardableResult
+    public func prewarm(modelURL: URL, language: DictationLanguage, forRewrite: Bool) -> Bool {
         do {
             try load(from: modelURL)
             let system = forRewrite ? Prompts.rewriteSystem(language) : Prompts.cleanupSystem(language)
@@ -105,8 +107,10 @@ public actor LlamaEngine {
                 ? Prompts.rewriteUser(selection: "Hallo.", instruction: "kürzer", language: language)
                 : Prompts.cleanupUser(text: "Hallo.", language: language)
             _ = try generate(system: system, user: user, maxTokens: 1, abort: AbortFlag(), requireFinished: false)
+            return true
         } catch {
             Debug.log("built-in model prewarm failed: \(error)")
+            return false
         }
     }
 

@@ -212,10 +212,17 @@ final class DictationController {
                 // would otherwise delay the first dictation.
                 if settings.llmBackend == .builtin {
                     state.builtinState = .optimizing
-                    await LlamaEngine.shared.prewarm(modelURL: url, language: prewarmLanguage, forRewrite: false)
+                    let loaded = await LlamaEngine.shared.prewarm(modelURL: url, language: prewarmLanguage, forRewrite: false)
                     // Deleted while the model was being optimized: the delete owns the state now.
                     guard isCurrent() else { return }
-                    state.builtinState = LlamaEngine.shared.isLoaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
+                    if settings.llmBackend != .builtin {
+                        // Switched to Ollama during the prewarm: the engine unloads the model again.
+                        state.builtinState = .initial(for: store.status(spec))
+                    } else {
+                        // Failed only when the load itself failed; an unload by memory pressure after a
+                        // successful load leaves a valid model that loads again on demand.
+                        state.builtinState = loaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
+                    }
                 } else {
                     // Switched to Ollama meanwhile: the model stays on disk, not in memory.
                     state.builtinState = .initial(for: store.status(spec))
