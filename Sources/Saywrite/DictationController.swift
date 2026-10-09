@@ -324,7 +324,15 @@ final class DictationController {
     private func prepare(_ action: HotkeyAction) {
         guard !prepared else { return }
         prepared = true
-        if let llm { Task.detached { await llm.prewarm(forRewrite: action == .rewrite) } }
+        if let llm {
+            // Switching the engine in the settings meanwhile must not load the built-in model again.
+            let backend = settings.llmBackend
+            Task.detached { [weak self] in
+                let current = await MainActor.run { self?.settings.llmBackend }
+                guard current == backend else { return }
+                await llm.prewarm(forRewrite: action == .rewrite)
+            }
+        }
         if action == .rewrite { selectionTask = Task { await TextInserter.selectedText() } }
         // Nothing is recorded, transcribed or sent to the AI server for a password field.
         let id = sessionID
@@ -538,8 +546,8 @@ final class DictationController {
             self.overlay.show(.done(result.summary.text, undo: undo))
             self.readyForNext(id)
         })
-        // Something dictated into a password field is not written to the history file.
-        if outcome != .secureField { appendToHistory(result) }
+        // A password field, or a possible one (secure input, focus unknown), never goes to the history file.
+        if outcome != .secureField && outcome != .copiedSecureInput { appendToHistory(result) }
         switch outcome {
         case .pasted:
             break
