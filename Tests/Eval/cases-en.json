@@ -1043,5 +1043,13 @@
    "Actually, no, three engineers."
   ],
   "expected": "We should hire three engineers."
+ },
+ {
+  "id": "r4-m1",
+  "style": "neutral",
+  "segs": [
+   "The server crashed. Oh no, the backup is gone too."
+  ],
+  "expected": "The server crashed. Oh no, the backup is gone too."
  }
 ]
