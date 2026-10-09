@@ -17,6 +17,14 @@ app: build
 	cp -R Support/en.lproj Support/de.lproj $(APP)/Contents/Resources/
 	@# Apache/BSD/MIT/CC BY require the notices to travel with binary redistributions.
 	cp LICENSE THIRD_PARTY_LICENSES $(APP)/Contents/Resources/
+	@# llama.cpp is a dynamic framework (the app's rpath points at Contents/Frameworks). Nested code is
+	@# signed before the app itself.
+	mkdir -p $(APP)/Contents/Frameworks
+	@f="$$(swift build -c release --show-bin-path)/llama.framework"; \
+	[ -d "$$f" ] || f="$$(find .build/artifacts -type d -path '*macos-arm64_x86_64/llama.framework' | head -1)"; \
+	[ -d "$$f" ] || { echo "llama.framework not found"; exit 1; }; \
+	ditto "$$f" $(APP)/Contents/Frameworks/llama.framework
+	codesign --force --sign - $(APP)/Contents/Frameworks/llama.framework
 	@# Ad-hoc signature with a designated requirement on the bundle identifier only, so macOS keeps
 	@# the Accessibility permission across rebuilds (the default ad-hoc requirement is the cdhash).
 	@# Trade-off: TCC trusts any binary that claims this identifier, so same-user code could sign itself
@@ -41,11 +49,12 @@ run: app
 test:
 	swift test
 
+# AI eval: the built-in model if it is downloaded, otherwise Ollama (EVAL_ARGS="--backend ollama" to choose).
 eval:
-	swift run -c release SaywriteEval Tests/Eval/cases.json
-	swift run -c release SaywriteEval Tests/Eval/cases-en.json
+	swift run -c release SaywriteEval Tests/Eval/cases.json $(EVAL_ARGS)
+	swift run -c release SaywriteEval Tests/Eval/cases-en.json $(EVAL_ARGS)
 
-# Rules only, no Ollama; fails when a set drops below Tests/Eval/rules-baseline.txt.
+# Rules only, no LLM; fails when a set drops below Tests/Eval/rules-baseline.txt.
 eval-rules:
 	scripts/eval-rules.sh
 
