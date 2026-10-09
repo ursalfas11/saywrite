@@ -27,7 +27,8 @@ struct FakeLLM: LLMClient {
     func cleanup(text: String, style: Style, language: DictationLanguage) async throws -> String {
         await log.record(text)
         if fail { throw LLMError.timeout }
-        return text.replacingOccurrences(of: "drei, nein, um ", with: "")
+        // A correction within one sentence and one across a pause ("drei. Nein, um vier").
+        return text.replacingOccurrences(of: "drei, nein, um ", with: "").replacingOccurrences(of: "drei. Nein, um ", with: "")
     }
     func rewrite(selection: String, instruction: String) async throws -> String { selection.uppercased() }
 }
