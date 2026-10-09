@@ -36,6 +36,8 @@ public actor LlamaEngine {
     private var lastUse = Date()
     private let abortBox = AbortBox()
     private let loaded = LockedFlag()
+    /// Set by `shutdown()`: a prewarm or request queued behind the final unload must not load the model again.
+    private nonisolated let closed = LockedFlag()
     private var idleTimer: IdleTimer?
     private var pressureSource: DispatchSourceMemoryPressure?
 
@@ -55,6 +57,7 @@ public actor LlamaEngine {
     /// Loads the model from `url` unless it is loaded already. Loading also compiles the Metal
     /// kernels the first time on a Mac, which can take a few seconds.
     public func load(from url: URL) throws {
+        if closed.value { throw LLMError.unreachable }
         if context != nil, loadedPath == url.path { return }
         unload()
         _ = Self.backendReady
@@ -150,6 +153,7 @@ public actor LlamaEngine {
     /// Also covers a load or a request that is running: the unload is queued behind it, and a running
     /// request is told to stop so the queue moves on.
     public nonisolated func shutdown(timeout: TimeInterval = 5) {
+        closed.value = true
         abortBox.flag?.set()
         let done = DispatchSemaphore(value: 0)
         Task.detached { await self.unload(); done.signal() }
@@ -193,7 +197,7 @@ public actor LlamaEngine {
 
         let tokens = try tokenize(ChatTemplate.qwen(system: system, user: user), vocab: vocab)
         let contextSize = Int(llama_n_ctx(context))
-        guard tokens.count + 8 <= contextSize else { throw LLMError.rejectedOutput }
+        guard tokens.count + 8 <= contextSize else { throw LLMError.tooLong }
         let budget = max(1, min(maxTokens, contextSize - tokens.count))
 
         let memory = llama_get_memory(context)
@@ -230,7 +234,8 @@ public actor LlamaEngine {
                 if status != 0 { throw decodeFailure(abort) }
             }
             // An answer cut off by the token or context limit must not replace a selection (the catch clears the cache).
-            guard finished || !requireFinished else { throw LLMError.rejectedOutput }
+            // Cut off because the context was full (not because the answer ran past its own budget): the selection is too long.
+            guard finished || !requireFinished else { throw budget < maxTokens ? LLMError.tooLong : LLMError.rejectedOutput }
             // Keep the prompt, drop the answer.
             _ = llama_memory_seq_rm(memory, 0, Int32(tokens.count), -1)
             return String(decoding: bytes, as: UTF8.self)

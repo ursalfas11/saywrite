@@ -688,6 +688,8 @@ final class DictationController {
             case .appChanged: overlay.show(.done(Self.appChangedMessage, undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
+        } catch LLMError.tooLong {
+            showError(L("Selection too long for the built-in AI – text unchanged", "Markierung zu lang für die eingebaute KI – Text unverändert"), action: nil)
         } catch LLMError.rejectedOutput {
             showError(L("AI answer did not look like a rewrite – text unchanged", "KI-Antwort war keine Umformulierung – Text unverändert"), action: nil)
         } catch {
