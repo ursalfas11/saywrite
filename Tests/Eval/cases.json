@@ -857,5 +857,46 @@
 "Das kostet 20 Euro Klammer auf ohne Versand Klammer zu."
 ],
 "expected": "Das kostet 20 Euro (ohne Versand)."
+},
+{
+"id": "r4-c1",
+"style": "neutral",
+"segs": [
+"Ich möchte fünf verschiedene Systeme bauen ich meine, ich will sechs verschiedene Systeme bauen."
+],
+"expected": "Ich will sechs verschiedene Systeme bauen.||Ich möchte sechs verschiedene Systeme bauen."
+},
+{
+"id": "r4-c2",
+"style": "neutral",
+"segs": [
+"Wir treffen uns am Montag nein am Dienstag."
+],
+"expected": "Wir treffen uns am Dienstag."
+},
+{
+"id": "r4-c3",
+"style": "neutral",
+"segs": [
+"Ich möchte fünf verschiedene Systeme bauen. Ich meine, ich will sechs verschiedene Systeme bauen."
+],
+"expected": "Ich will sechs verschiedene Systeme bauen.||Ich möchte sechs verschiedene Systeme bauen."
+},
+{
+"id": "r4-c4",
+"style": "neutral",
+"segs": [
+"Ich möchte fünf verschiedene Systeme bauen.",
+"Ich meine, ich will sechs verschiedene Systeme bauen."
+],
+"expected": "Ich will sechs verschiedene Systeme bauen.||Ich möchte sechs verschiedene Systeme bauen."
+},
+{
+"id": "r4-m1",
+"style": "neutral",
+"segs": [
+"Das Konzert war laut. Ich meine, ich fand es trotzdem schön."
+],
+"expected": "Das Konzert war laut. Ich meine, ich fand es trotzdem schön."
 }
 ]

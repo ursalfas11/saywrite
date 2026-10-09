@@ -183,4 +183,43 @@ final class ReviewFindingsTests: XCTestCase {
         XCTAssertEqual(result?.final, "Wir treffen uns um vier.")
         XCTAssertEqual(result?.withoutAI, "Wir treffen uns um drei, nein, um vier.")
     }
+
+    /// The recognizer sets the comma only after the marker ("… bauen ich meine, ich will …").
+    func testCorrectionWithoutCommaBeforeMarker() {
+        XCTAssertTrue(CleanupGate.decide(raw: "Ich möchte fünf verschiedene Systeme bauen ich meine, ich will sechs verschiedene Systeme bauen.", style: .neutral).usesLLM)
+        XCTAssertTrue(CleanupGate.decide(raw: "Send it to Mark i mean, Mike.", style: .neutral, language: .english).usesLLM)
+        // An opinion, not a correction.
+        XCTAssertFalse(CleanupGate.decide(raw: "Das finde ich gut ich meine, dass es passt.", style: .neutral).usesLLM)
+        XCTAssertFalse(CleanupGate.decide(raw: "That is fine i mean, it works.", style: .neutral, language: .english).usesLLM)
+    }
+
+    /// The new version's words must survive; a result that keeps the old version is refused.
+    func testCorrectedWordsMustSurvive() {
+        XCTAssertEqual(CleanupGate.correctedWords(in: "Wir treffen uns am Montag nein am Dienstag.", language: .german), ["dienstag"])
+        XCTAssertEqual(CleanupGate.correctedWords(in: "Buy eggs and milk. Scratch that, just eggs.", language: .english), ["eggs"])
+        let input = "Wir treffen uns am Montag nein am Dienstag."
+        XCTAssertFalse(DictationSession.keepsCorrectedNumbers(input, "Wir treffen uns am Montag.", .german))
+        XCTAssertTrue(DictationSession.keepsCorrectedNumbers(input, "Wir treffen uns am Dienstag.", .german))
+        let systems = "Ich möchte fünf verschiedene Systeme bauen ich meine, ich will sechs verschiedene Systeme bauen."
+        XCTAssertTrue(DictationSession.keepsCorrectedNumbers(systems, "Ich will sechs verschiedene Systeme bauen.", .german))
+        XCTAssertFalse(DictationSession.keepsCorrectedNumbers(systems, "Ich möchte fünf verschiedene Systeme bauen.", .german))
+    }
+
+    /// "Ich meine, ich …" starts an opinion, unless it repeats the sentence before: then it corrects it.
+    func testEchoCorrectsPreviousSentence() {
+        XCTAssertTrue(CleanupGate.correctsPrevious(
+            "Ich meine, ich will sechs verschiedene Systeme bauen.", previous: "Ich möchte fünf verschiedene Systeme bauen."))
+        XCTAssertFalse(CleanupGate.correctsPrevious("Ich meine, ich fand es trotzdem schön.", previous: "Das Konzert war laut."))
+        XCTAssertFalse(CleanupGate.correctsPrevious("Ich meine, ich will sechs verschiedene Systeme bauen.", previous: nil))
+        XCTAssertTrue(CleanupGate.correctsPrevious(
+            "I mean, we should order three large pizzas.", previous: "We should order two large pizzas.", language: .english))
+    }
+
+    /// Only the words new in the corrected version count; a synonym for the rest passes.
+    func testChangedWords() {
+        let text = "Ich möchte fünf verschiedene Systeme bauen. Ich meine, ich will sechs verschiedene Systeme bauen."
+        XCTAssertEqual(CleanupGate.changedWords(in: text, language: .german), ["will", "sechs"])
+        XCTAssertTrue(DictationSession.keepsCorrectedNumbers(text, "Ich möchte sechs verschiedene Systeme bauen.", .german))
+        XCTAssertFalse(DictationSession.keepsCorrectedNumbers(text, "Ich möchte fünf verschiedene Systeme bauen.", .german))
+    }
 }

@@ -23,6 +23,8 @@ public enum CleanupGate {
     static let correctionPatterns: [String] = [
         #"[\p{L}\p{N}],\s*(?:(?:also|oder|ach)\s+)?(?:nein|nee|ne)(?:\s+warte)?\s*,\s*"# + notACorrection + #"\S"#,
         #",\s*ich mein(?:e|te)?\b(?!\s+(?:das|es)\s+(?:ernst|so)\b)"#,
+        // The recognizer often sets the comma only after the marker: "… bauen ich meine, ich will …".
+        #"[\p{L}\p{N}]\s+ich mein(?:e|te)\s*,\s*(?!(?:dass|ob|das|es)\b)\S"#,
         #",\s*besser gesagt\b"#,
         #",\s*oder besser\b"#,
         #",\s*moment\s*,"#,
@@ -47,6 +49,37 @@ public enum CleanupGate {
         #"^(?:quatsch|korrektur)\b\s*[,:!]"#,
     ]
 
+    /// "Ich meine, …" / "I mean, …" at a sentence start, whatever follows. On its own that is mostly an
+    /// opinion ("Ich meine, ich fand es trotzdem schön"); see `correctsPrevious`.
+    static let echoMarker = #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:ich meine|besser gesagt|oder besser)\s*,"#
+    static let englishEchoMarker = #"^(?:(?:sorry|oh)\s*,?\s+)?(?:i mean|or rather)\s*,"#
+    /// The same marker inside a joined text, for finding where the new version starts.
+    static let echoTail = #"(?:^|[.!?]\s+)(?:ich meine|besser gesagt|oder besser)\s*,\s*\S"#
+    static let englishEchoTail = #"(?:^|[.!?]\s+)(?:i mean|or rather)\s*,\s*\S"#
+
+    /// Whether `sentence` corrects `previous`: a marker at its start, or "Ich meine, …" that repeats
+    /// the sentence before ("Ich möchte fünf Systeme bauen." + "Ich meine, ich will sechs Systeme bauen.").
+    /// Two shared content words tell a correction from an opinion that only starts the same way.
+    public static func correctsPrevious(_ sentence: String, previous: String?, language: DictationLanguage = .german) -> Bool {
+        if startsWithCorrection(sentence, language: language) { return true }
+        guard language != .other, let previous, !previous.isEmpty else { return false }
+        let lower = sentence.lowercased()
+        guard let marker = lower.range(of: language == .english ? englishEchoMarker : echoMarker, options: .regularExpression) else {
+            return false
+        }
+        let before = contentWords(previous.lowercased())
+        let repeated = Set(contentWords(String(lower[marker.upperBound...]))).filter { word in
+            before.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
+        }
+        return repeated.count >= 2
+    }
+
+    static func contentWords(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0.isWhitespace })
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count >= 4 && !fillerWords.contains($0) }
+    }
+
     /// "Nein, um sechs." after a pause: only short fragments count, a full sentence starting with
     /// "Nein, am Montag kann ich leider nicht" is an answer.
     static let bareNein = #"^(?:nein|nee|ne)\b\s*,?\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|erst|\d+|null|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\b"#
@@ -70,6 +103,7 @@ public enum CleanupGate {
     static let englishCorrectionPatterns: [String] = [
         #"[\p{L}\p{N}],\s*(?:(?:oh|or)\s+)?no(?:\s+wait)?\s*,\s*"# + englishNotACorrection + #"\S"#,
         #",\s*i mean\b(?!\s*,?\s*(?:it|that|this|we|i|you|they|he|she|seriously|honestly|really|come on)\b)"#,
+        #"[\p{L}\p{N}]\s+i mean\s*,\s*(?!(?:it|that|this|seriously|honestly|really|come on)\b)\S"#,
         #",\s*or rather\b"#,
         #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
         #",\s*make (?:that|it)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|ten)\b"#,
@@ -95,8 +129,49 @@ public enum CleanupGate {
     /// Numbers spoken after the last correction marker: the corrected values that must survive
     /// ("2 bottles, wait, 3 bottles" -> "3").
     public static func correctedNumbers(in text: String, language: DictationLanguage) -> [String] {
+        guard let tail = correctedTail(in: text, language: language) else { return [] }
+        return tail.split(whereSeparator: { !$0.isNumber }).map(String.init)
+    }
+
+    /// Short and function words that a correct result may drop or change around the new version.
+    static let fillerWords: Set<String> = [
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "und", "oder", "aber",
+        "doch", "noch", "mal", "dann", "also", "bitte", "nein", "nee", "meine", "meinte", "warte", "moment",
+        "besser", "gesagt", "sorry", "the", "and", "but", "then", "please", "mean", "meant", "wait", "rather",
+        "actually", "scratch", "that", "make", "just", "only", "instead", "nur", "lieber", "eher", "stattdessen",
+    ]
+
+    /// The content words after the last correction marker: the new version that must survive
+    /// ("am Montag nein am Dienstag" -> ["dienstag"]). A result without them kept the old version.
+    public static func correctedWords(in text: String, language: DictationLanguage) -> [String] {
+        guard let tail = correctedTail(in: text, language: language) else { return [] }
+        return correctionWords(String(tail))
+    }
+
+    /// Words of three letters or more, no filler, no bare numbers (those are checked as numbers).
+    static func correctionWords(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0.isWhitespace })
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count >= 3 && !fillerWords.contains($0) && !$0.allSatisfy(\.isNumber) }
+    }
+
+    /// The corrected words that are new against the version before the marker ("fünf … bauen ich meine,
+    /// ich will sechs … bauen" -> ["will", "sechs"]): what tells the new version from the old one.
+    public static func changedWords(in text: String, language: DictationLanguage) -> [String] {
+        guard let tail = correctedTail(in: text, language: language) else { return [] }
+        // Compared word for word with the same filter, so "ich" on both sides is no change.
+        let head = correctionWords(String(text.lowercased().dropLast(tail.count)))
+        return correctedWords(in: text, language: language).filter { word in
+            !head.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
+        }
+    }
+
+    /// The lowercased text from the last correction marker on, nil without one.
+    static func correctedTail(in text: String, language: DictationLanguage) -> Substring? {
         let lower = text.lowercased()
-        let patterns = (language == .english ? englishCorrectionPatterns + englishLeadingPatterns : correctionPatterns + leadingPatterns)
+        let patterns = language == .english
+            ? englishCorrectionPatterns + englishLeadingPatterns + [englishEchoTail]
+            : correctionPatterns + leadingPatterns + [echoTail]
         var lastEnd: String.Index?
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
@@ -105,11 +180,10 @@ public enum CleanupGate {
                 if lastEnd == nil || range.upperBound > lastEnd! { lastEnd = range.upperBound }
             }
         }
-        guard let lastEnd else { return [] }
+        guard let lastEnd else { return nil }
         // Start right after the marker word itself, so the number that belongs to the new version counts.
         let start = lower.index(lastEnd, offsetBy: -1, limitedBy: lower.startIndex) ?? lastEnd
-        let tail = lower[start...]
-        return tail.split(whereSeparator: { !$0.isNumber }).map(String.init)
+        return lower[start...]
     }
 
     static let maxWordsWithoutPunctuation = 25
