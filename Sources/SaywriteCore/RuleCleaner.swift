@@ -123,6 +123,12 @@ public enum RuleCleaner {
         var result = text.replacingOccurrences(
             of: #",\s*(?i:"# + alternation + #")(?![\p{L}\p{N}-])\s*,\s*(?=(?i:"# + clauseStarts + #")\b)"#,
             with: ", ", options: .regularExpression)
+        // Between two German nouns the first comma is the list separator ("Äpfel, äh, Birnen"), so it stays.
+        if language == .german {
+            result = result.replacingOccurrences(
+                of: #"(\p{Lu}[\p{L}-]*)\s*,\s*(?i:"# + alternation + #")(?![\p{L}\p{N}-])\s*,\s*(?=\p{Lu}[\p{L}-]*(?:[\s.,!?]|$))"#,
+                with: "$1, ", options: .regularExpression)
+        }
         result = result.replacingOccurrences(
             of: #",\s*(?i:"# + alternation + #")(?![\p{L}\p{N}-])\s*,\s*"#,
             with: " ", options: .regularExpression)
@@ -181,7 +187,9 @@ public enum RuleCleaner {
                     let isGrammatical = doubles.contains(firstNorm[0]) && nounFollows
                     let isAllowedDouble = isNumber || (size == 1 && (emphasis.contains(firstNorm[0]) || isGrammatical))
                     let hasNewline = first.contains { $0.contains("\n") }
-                    if firstNorm == secondNorm, !firstNorm.contains(""), !endsClause, !isAllowedDouble, !hasNewline {
+                    // "M Ü L L E R": a spelled name or code keeps its doubled letters.
+                    let isSpelled = size == 1 && isSingleChar(firstNorm[0]) && spelledRunLength(tokens, around: i) >= 3
+                    if firstNorm == secondNorm, !isSpelled, !firstNorm.contains(""), !endsClause, !isAllowedDouble, !hasNewline {
                         tokens.removeSubrange(i..<i + size)
                         changed = true
                     } else {
@@ -191,6 +199,19 @@ public enum RuleCleaner {
             }
         }
         return tokens.joined(separator: " ")
+    }
+
+    private static func isSingleChar(_ norm: String) -> Bool {
+        norm.count == 1 && (norm.first?.isLetter == true || norm.first?.isNumber == true)
+    }
+
+    /// How many single-letter or single-digit tokens in a row contain the token at `index`.
+    private static func spelledRunLength(_ tokens: [String], around index: Int) -> Int {
+        var start = index
+        while start > 0, isSingleChar(normalizeToken(tokens[start - 1])) { start -= 1 }
+        var end = index
+        while end + 1 < tokens.count, isSingleChar(normalizeToken(tokens[end + 1])) { end += 1 }
+        return end - start + 1
     }
 
     /// Spoken punctuation, quotes and brackets.
