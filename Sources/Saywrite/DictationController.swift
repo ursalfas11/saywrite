@@ -65,6 +65,10 @@ final class DictationController {
     private var sessionApp: String?
     /// Cheap check for a password field at the start, so nothing is recorded into one.
     private var secureProbeTask: Task<Void, Never>?
+    /// The probe of this session found a password field.
+    private var secureFieldSeen = false
+    /// Secure input hides a possible password field from Accessibility: the AI server gets nothing.
+    private var sessionWithholdAI = false
     private var recordingStart = Date()
     private var lastVoice = Date()
     /// Last inserted dictation that has a rules-only alternative, for the "Original" button.
@@ -187,28 +191,40 @@ final class DictationController {
         let store = modelStore
         state.builtinState = .downloading(Double(store.partialBytes(spec)) / Double(spec.size))
         let pendingDelete = deleteTask
+        let retired = retiredDownload
+        downloadGeneration += 1
+        let generation = downloadGeneration
         downloadTask = Task {
             // A delete that is still queued behind the engine must finish first, or it would remove
-            // the files of this download.
+            // the files of this download. So must a download that a delete cancelled: it may still
+            // be winding down on the same .part file.
+            await retired?.value
             await pendingDelete?.value
+            // Whatever this task writes below counts only while it is the current download.
+            let isCurrent = { self.downloadGeneration == generation }
+            guard isCurrent() else { return }
             do {
                 let url = try await ModelDownloader(spec: spec, store: store).run { phase in
-                    Task { @MainActor in self.applyDownload(phase) }
+                    Task { @MainActor in if isCurrent() { self.applyDownload(phase) } }
                 }
+                guard isCurrent() else { return }
                 // Load the model once now: the first run on a Mac compiles the Metal kernels, which
                 // would otherwise delay the first dictation.
                 if settings.llmBackend == .builtin {
                     state.builtinState = .optimizing
                     await LlamaEngine.shared.prewarm(modelURL: url, language: prewarmLanguage, forRewrite: false)
+                    // Deleted while the model was being optimized: the delete owns the state now.
+                    guard isCurrent() else { return }
                     state.builtinState = LlamaEngine.shared.isLoaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
                 } else {
                     // Switched to Ollama meanwhile: the model stays on disk, not in memory.
                     state.builtinState = .initial(for: store.status(spec))
                 }
             } catch is CancellationError {
-                state.builtinState = .initial(for: store.status(spec))
+                if isCurrent() { state.builtinState = .initial(for: store.status(spec)) }
             } catch {
                 Debug.log("model download failed: \(error)")
+                guard isCurrent() else { return }
                 // An interrupted connection leaves the partial file: say so, the button continues it.
                 if (error as? ModelDownloadError) == .incomplete {
                     state.builtinState = .failed(L("Download interrupted – continue to resume", "Download unterbrochen – Fortsetzen macht weiter"))
@@ -216,9 +232,15 @@ final class DictationController {
                     state.builtinState = .failed(error.localizedDescription)
                 }
             }
-            downloadTask = nil
+            if isCurrent() { downloadTask = nil }
         }
     }
+
+    /// Bumped by every download and every delete: a task that finds it changed is outdated and
+    /// must not touch the state or `downloadTask`.
+    private var downloadGeneration = 0
+    /// The download a delete cancelled, until the next download has waited for it.
+    private var retiredDownload: Task<Void, Never>?
 
     private func applyDownload(_ phase: ModelDownloader.Phase) {
         switch phase {
@@ -240,7 +262,9 @@ final class DictationController {
 
     func deleteBuiltinModel() {
         downloadTask?.cancel()
+        if let running = downloadTask { retiredDownload = running }
         downloadTask = nil
+        downloadGeneration += 1
         let spec = modelSpec
         let store = modelStore
         state.builtinState = .notDownloaded
@@ -338,7 +362,10 @@ final class DictationController {
         let id = sessionID
         secureProbeTask = Task { [weak self] in
             guard await TextInserter.focusIsSecureField() else { return }
-            guard let self, !Task.isCancelled, self.sessionID == id, case .recording = self.phase else { return }
+            guard let self, !Task.isCancelled, self.sessionID == id else { return }
+            self.secureFieldSeen = true
+            // A short press is already processing: finish() waits for this probe and stops there.
+            guard case .recording = self.phase else { return }
             self.hotkeys.reset()
             self.cancel()
             self.showError(L("Password field – not recorded", "Passwortfeld – nicht aufgenommen"), action: nil)
@@ -365,6 +392,7 @@ final class DictationController {
         }
 
         sessionID = UUID()
+        secureFieldSeen = false
         sessionApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let style = settings.styleMap.style(for: sessionApp)
         // Where a password field may be invisible to Accessibility, secure input is the only hint:
@@ -372,6 +400,7 @@ final class DictationController {
         let isElectron = NSWorkspace.shared.frontmostApplication.map(TextInserter.isElectron) ?? false
         let withholdAI = TextInserter.secureInputActive
             && PasteTargetRules.secureFieldMayBeInvisible(bundleID: sessionApp ?? "", isElectron: isElectron)
+        sessionWithholdAI = withholdAI
         let session = DictationSession(
             transcriber: transcriber, llm: withholdAI ? nil : llm, style: style, appBundleID: sessionApp,
             language: settings.language, replacements: settings.replacements)
@@ -497,6 +526,17 @@ final class DictationController {
         chunkStream?.finish()
         await chunkConsumer?.value
 
+        // A short press reaches this point before the password-field probe answered: wait for it, so
+        // nothing is transcribed or sent to the AI server for a password field.
+        await secureProbeTask?.value
+        if secureFieldSeen, sessionID == id {
+            if let session { await session.cancel() }
+            hotkeys.reset()
+            showError(L("Password field – not recorded", "Passwortfeld – nicht aufgenommen"), action: nil)
+            teardown()
+            return
+        }
+
         switch action {
         case .dictate:
             await finishDictation(id: id)
@@ -603,6 +643,11 @@ final class DictationController {
         }
         guard let llm else {
             showError(L("AI is turned off in settings", "KI ist in den Einstellungen aus"), action: nil)
+            return
+        }
+        // The selection must not reach the AI server where a password field may be invisible.
+        guard !sessionWithholdAI else {
+            showError(L("Secure input active – AI off", "Gesicherte Eingabe aktiv – KI aus"), action: nil)
             return
         }
         guard samples.count >= 16_000 / 3,
