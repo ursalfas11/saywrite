@@ -145,7 +145,12 @@ public enum CleanupGate {
     /// ("am Montag nein am Dienstag" -> ["dienstag"]). A result without them kept the old version.
     public static func correctedWords(in text: String, language: DictationLanguage) -> [String] {
         guard let tail = correctedTail(in: text, language: language) else { return [] }
-        return tail.split(whereSeparator: { $0.isWhitespace })
+        return correctionWords(String(tail))
+    }
+
+    /// Words of three letters or more, no filler, no bare numbers (those are checked as numbers).
+    static func correctionWords(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0.isWhitespace })
             .map { $0.trimmingCharacters(in: .punctuationCharacters) }
             .filter { $0.count >= 3 && !fillerWords.contains($0) && !$0.allSatisfy(\.isNumber) }
     }
@@ -154,7 +159,8 @@ public enum CleanupGate {
     /// ich will sechs … bauen" -> ["will", "sechs"]): what tells the new version from the old one.
     public static func changedWords(in text: String, language: DictationLanguage) -> [String] {
         guard let tail = correctedTail(in: text, language: language) else { return [] }
-        let head = contentWords(String(text.lowercased().dropLast(tail.count)))
+        // Compared word for word with the same filter, so "ich" on both sides is no change.
+        let head = correctionWords(String(text.lowercased().dropLast(tail.count)))
         return correctedWords(in: text, language: language).filter { word in
             !head.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
         }
