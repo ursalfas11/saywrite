@@ -56,6 +56,10 @@ public enum CleanupGate {
         #"\bkorrektur\s*:"#,
     ]
 
+    /// One to three words that end the sentence and are no clause opener or filler.
+    static let germanBareFragment = #"(?!(?:dass|ob|das|es|wir|ich|du|er|sie|ihr|man|damit|ja|doch|schon|nur|nicht|so|wirklich|ernsthaft|ehrlich|der|die|den|dem|ein|eine|mein|meine|dein|deine|unser|unsere)\b)[\p{L}\p{N}]+(?:\s+[\p{L}\p{N}]+){0,2}\s*[.!?]?$"#
+    static let englishBareFragment = #"(?!(?:that|it|this|i|we|you|he|she|they|there|the|a|an|my|our|your|his|her|their|so|just|really|seriously|honestly|literally|not|no|yes|well|like)\b)[\p{L}\p{N}]+(?:\s+[\p{L}\p{N}]+){0,2}\s*[.!?]?$"#
+
     /// Sentence start that corrects or throws away the sentence before it. Deliberately narrow:
     /// "Vergiss das Ladekabel nicht", "Warte kurz", "Ich meine, dass …", "Moment mal" stay untouched.
     static let leadingPatterns: [String] = [
@@ -63,7 +67,11 @@ public enum CleanupGate {
         #"^(?:aber|also|ach|oh)\s+(?:nein|nee|ne)\b\s*,\s*"# + notACorrection + #"\S"#,
         #"^(?:äh|oder)\s+(?:nein|nee|ne)\b\s*,\s*"# + notAnAnswer + #"\S"#,
         #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:vergiss (?:das|es)|(?:streich|lösch) das)\s*[,.!]"#,
-        #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:ich meine|besser gesagt|oder besser)\b(?!\s*,?\s*(?:dass|ob|das|es|wir|ich|du|er|sie|man|damit)\b)\s*,?\s*[\p{L}\p{N}]"#,
+        #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:besser gesagt|oder besser)\b(?!\s*,?\s*(?:dass|ob|das|es|wir|ich|du|er|sie|man|damit)\b)\s*,?\s*[\p{L}\p{N}]"#,
+        // "Ich meine, …" opens an opinion as often as a correction ("Ich meine, die Lösung ist gut"): only
+        // a preposition or number ("Ich meine am Dienstag") or a bare fragment ("Ich meine Paul")
+        // counts. A full sentence needs `correctsPrevious` to repeat the sentence before.
+        #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?ich meine\s*,?\s*(?:(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)\b|"# + germanBareFragment + #")"#,
         #"^(?:sorry|entschuldigung|pardon)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)"#,
         #"^(?:warte|moment)(?!\s+mal)\s*,\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|nein|nee|\d)"#,
         #"^(?:warte|moment)(?!\s+mal)\s*,\s*(?:ich|es|wir)\b(?=[^.!?]*\b(?:lieber|doch|eher|stattdessen|besser)\b)"#,
@@ -152,7 +160,10 @@ public enum CleanupGate {
         #"[\p{L}\p{N}]\s+i mean\s*,\s*(?!(?:it|that|this|seriously|honestly|really|come on)\b)\S"#,
         #",\s*or rather\b"#,
         #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
-        #",\s*make (?:that|it)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|ten)\b"#,
+        // "Let's meet Monday, make that Tuesday": any word, but not "make it work" / "make it clear".
+        #",\s*make (?:that|it)\s+(?!(?:work|clear|happen|right|better|easy|easier|possible|so|up|a|an|the|simple|quick|quicker|fast|faster|short|shorter|good|nice|sure|count|real|official|known|obvious|perfect|look|sound|feel|more|less|my|our|your|their|his|her|its|this|that|it|there|to|out|through|clearer|worse|safe|happen)\b)\S"#,
+        // "I want the red one, no, the blue one": the determiner comes back, so "no," repeats the phrase.
+        #"\b(a|an|the|my|our|your|their)\s+[^.!?,]{1,40}?,\s*(?:or\s+)?no\s*,\s*\1\s+\S"#,
         englishAfterOpener + #",\s*wait\s*,\s*(?!(?:i|you|we|it|that|this|he|she|they|what|let|please|just|hold|okay|ok|maybe|so|now)\b)\S"#,
         #",\s*(?:sorry|pardon)\s*,\s*(?:at|on|in|to|for|by|from|\d)"#,
         #"\b(?:at|on|in|by|from)\s+\S+\s+no\s+(?:at|on|in|by|from)\b"#,
@@ -167,7 +178,12 @@ public enum CleanupGate {
         // "Oh no, the backup is gone too" is an exclamation.
         #"^oh\s*,?\s+no\b\s*,\s*"# + englishNotACorrection + #"\S"#,
         #"^(?:(?:actually|sorry)\s*,?\s+)?(?:scratch that|never mind|forget (?:that|it))\s*[,.!]"#,
-        #"^(?:(?:sorry)\s*,?\s+)?(?:i mean|or rather)\b(?!\s*,?\s*(?:that|it|this|i|we|you)\b)\s*,?\s*[\p{L}\p{N}]"#,
+        #"^(?:(?:sorry)\s*,?\s+)?or rather\b(?!\s*,?\s*(?:that|it|this|i|we|you)\b)\s*,?\s*[\p{L}\p{N}]"#,
+        // "I mean, she had a train to catch" is filler, not a correction. Only a preposition or number
+        // ("I mean at nine"), a bare fragment ("I mean Tuesday") or "Sorry, I mean …" counts; a full
+        // sentence needs `correctsPrevious` to repeat the sentence before.
+        #"^(?:sorry\s*,?\s+)?i mean\s*,?\s*"# + englishIdioms + #"(?:(?:at|on|in|to|for|by|from)\b|\d|"# + englishBareFragment + #")"#,
+        #"^sorry\s*,?\s+i mean\b(?!\s*,?\s*(?:that|it|this|i|we|you)\b)\s*,?\s*[\p{L}\p{N}]"#,
         #"^(?:sorry|actually)\s*,\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
         #"^wait\s*,\s*(?:at|on|in|to|for|by|from|no|\d)"#,
     ]
