@@ -76,9 +76,8 @@ enum OverlaySnapshot {
         UILanguage.override = false // screenshots are in English
         try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         let states: [(String, OverlayState, String, String)] = [
-            ("recording", .recording(handsFree: true, rewrite: false), "I'd like to buy a new bike.", "Ideally one with lights"),
-            ("empty", .recording(handsFree: true, rewrite: false), "", ""),
-            ("rewrite", .recording(handsFree: true, rewrite: true), "", "Make this more formal"),
+            ("recording", .recording(handsFree: true, rewrite: false), "", ""),
+            ("rewrite", .recording(handsFree: true, rewrite: true), "", ""),
             ("processing", .processing, "I'd like to buy a new bike. Ideally one with lights.", ""),
             ("done", .done(ChangeSummary(punctuationChanged: 1, wordsChanged: 5, usedLLM: true).text, undo: true), "I'd like to buy a new bike.", ""),
             ("error", .error("No microphone access"), "", ""),
@@ -89,8 +88,10 @@ enum OverlaySnapshot {
             model.committedText = committed
             model.partialText = partial
             model.levels = (0..<OverlayModel.dotCount).map { i in Float(abs(sin(Double(i) * 0.7))) * 0.8 }
+            // The pill is one 34 pt row; room around it for its shadow, centered like on screen.
             let view = OverlayView(model: model, onStop: {}, onErrorTap: {})
-                .frame(width: 400, height: 116)
+                .frame(width: 360, height: 34)
+                .padding(.vertical, 18)
                 .background(LinearGradient(
                     colors: [Color(red: 0.36, green: 0.22, blue: 0.55), Color(red: 0.12, green: 0.14, blue: 0.30)],
                     startPoint: .topLeading, endPoint: .bottomTrailing))
