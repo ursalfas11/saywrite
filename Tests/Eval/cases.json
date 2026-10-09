@@ -978,5 +978,21 @@
 "Er hat gesagt, nein, das geht nicht."
 ],
 "expected": "Er hat gesagt, nein, das geht nicht."
+},
+{
+"id": "r7-s1",
+"style": "neutral",
+"segs": [
+"Mein Name ist Müller, das schreibt man M Ü L L E R."
+],
+"expected": "Mein Name ist Müller, das schreibt man M Ü L L E R."
+},
+{
+"id": "r7-e1",
+"style": "neutral",
+"segs": [
+"Ich brauche Äpfel, äh, Birnen und Bananen."
+],
+"expected": "Ich brauche Äpfel, Birnen und Bananen."
 }
 ]
