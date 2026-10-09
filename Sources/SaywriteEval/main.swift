@@ -1,12 +1,15 @@
 // Quality evaluation of the text pipeline with the real local LLM.
 // Usage: swift run -c release SaywriteEval [Tests/Eval/cases.json] [--no-ai] [--verbose]
-//        [--model qwen2.5:3b] [--report Tests/Eval/results.jsonl]
+//        [--backend llama|ollama] [--model qwen2.5:3b] [--model-path file.gguf] [--report Tests/Eval/results.jsonl]
+// --backend defaults to llama (the built-in model) when its file is in ~/Library/Application Support/Saywrite/Models,
+// otherwise ollama. --model names the Ollama model, --model-path the GGUF file of the built-in one.
 // --report appends one JSON line per run (date, set, model, result), so the quality claims in the
 // README have a history instead of a single number.
 // Each case is one dictation (one or more recognizer segments; a leading "+" marks a segment that
 // continues the previous one without a pause) and the expected final text ("||" separates variants).
 import Foundation
 import SaywriteCore
+import SaywriteLlama
 
 struct EvalCase: Codable {
     var id: String
@@ -22,8 +25,8 @@ final class ScriptedTranscriber: Transcriber, @unchecked Sendable {
 }
 
 final class TimedLLM: LLMClient, @unchecked Sendable {
-    let inner: OllamaClient
-    init(model: String) { inner = OllamaClient(configuration: .init(model: model)) }
+    let inner: LLMClient
+    init(inner: LLMClient) { self.inner = inner }
     private let lock = NSLock()
     private(set) var latencies: [Double] = []
     private(set) var calls: [String] = []
@@ -52,14 +55,29 @@ func option(_ name: String) -> String? {
     guard let index = args.firstIndex(of: name), args.index(after: index) < args.endIndex else { return nil }
     return args[args.index(after: index)]
 }
-let model = option("--model") ?? OllamaClient.Configuration().model
 let reportPath = option("--report")
-let optionValues = Set([option("--model"), reportPath].compactMap { $0 })
+let modelStore = ModelStore()
+let modelPath = option("--model-path") ?? modelStore.fileURL(.qwen25_3b).path
+let backend: LLMBackend
+switch option("--backend") {
+case "llama", "builtin": backend = .builtin
+case "ollama": backend = .ollama
+case nil: backend = LLMBackend.evalDefault(modelInstalled: FileManager.default.fileExists(atPath: modelPath))
+case let other?:
+    print("unknown --backend \(other) (llama or ollama)")
+    exit(2)
+}
+let ollamaModel = option("--model") ?? OllamaClient.Configuration().model
+let model = backend == .builtin ? (modelPath as NSString).lastPathComponent : ollamaModel
+let optionValues = Set([option("--model"), option("--model-path"), option("--backend"), reportPath].compactMap { $0 })
 let path = args.first { !$0.hasPrefix("--") && !optionValues.contains($0) } ?? "Tests/Eval/cases.json"
 let useAI = !args.contains("--no-ai")
 let verbose = args.contains("--verbose")
 let cases = try JSONDecoder().decode([EvalCase].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-let llm = TimedLLM(model: model)
+let llm = TimedLLM(inner: backend == .builtin
+    ? LlamaClient(modelURL: URL(fileURLWithPath: modelPath))
+    : OllamaClient(configuration: .init(model: ollamaModel)))
+if useAI { print("backend: \(backend.rawValue) (\(model))") }
 if useAI { await llm.prewarm(forRewrite: false) }
 
 var passed = 0
@@ -89,11 +107,14 @@ if !sorted.isEmpty {
                  sorted[sorted.count / 2], sorted[Int(Double(sorted.count) * 0.9)], sorted.last!))
 }
 
+LlamaEngine.shared.shutdown()
+
 if let reportPath {
     let entry: [String: Any] = [
         "date": ISO8601DateFormatter().string(from: Date()),
         "set": (path as NSString).lastPathComponent,
         "model": useAI ? model : "none",
+        "backend": useAI ? backend.rawValue : "none",
         "passed": passed,
         "total": cases.count,
         "llmCalls": sorted.count,
