@@ -47,7 +47,7 @@ public enum DictationLanguage: String, CaseIterable, Sendable {
         "und", "der", "die", "das", "ich", "nicht", "ist", "ein", "eine", "zu", "mit", "wir", "du", "sie", "es",
         "auf", "für", "dass", "den", "dem", "von", "bitte", "danke", "auch", "noch", "mal", "hab", "habe", "bin",
         "sind", "morgen", "heute", "kannst", "wie", "wo", "aber", "oder", "schon", "jetzt", "hier", "nein", "ja",
-        "sehr", "gut", "wenn", "weil", "sich", "mir", "mich", "dir", "uns", "hallo", "gerne", "vielleicht", "doch",
+        "um", "er", "uhr", "bei", "nach", "im", "vom", "zum", "zur", "sehr", "gut", "wenn", "weil", "sich", "mir", "mich", "dir", "uns", "hallo", "gerne", "vielleicht", "doch",
     ]
 
     static let englishMarkers: Set<String> = [
