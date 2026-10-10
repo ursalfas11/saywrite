@@ -69,3 +69,59 @@ public enum PasteTargetRules {
         return .none
     }
 }
+
+/// What to do with a finished dictation once Accessibility has been asked about the focus.
+public enum SecureInputRules {
+    public enum Decision: Sendable, Equatable {
+        /// Paste as usual.
+        case proceed
+        /// The focused element is a password field: nothing is inserted and the text is not saved.
+        case secureField
+        /// Secure event input is on and the focus is not a known text field (a terminal prompt, a
+        /// browser field that exposes nothing): do not paste, but keep the text on the clipboard.
+        case copyOnly
+    }
+
+    /// `secureInputEnabled` is system-wide: Terminal's Secure Keyboard Entry, a password manager or a
+    /// stuck lock set it with no password field in sight. It only blocks the paste where the focus
+    /// is not a recognised text field, and then the text is copied, never discarded.
+    public static func decide(elementIsSecure: Bool, secureInputEnabled: Bool, target: PasteTarget) -> Decision {
+        if elementIsSecure { return .secureField }
+        if secureInputEnabled && target != .textField { return .copyOnly }
+        return .proceed
+    }
+}
+
+/// What Accessibility reports as the current selection of the focused element.
+public enum SelectionReading: Sendable, Equatable {
+    case text(String)
+    /// A real "nothing selected".
+    case empty
+    /// The app does not expose its selection.
+    case unavailable
+}
+
+public extension PasteTargetRules {
+    /// A rewrite replaces the selection by paste. If the selection is no longer the one that was
+    /// rewritten (the user clicked elsewhere meanwhile), pasting would overwrite the wrong text.
+    /// When the app exposes no selection there is nothing to compare, so the paste goes ahead.
+    static func rewriteMayReplace(captured: String, current: SelectionReading) -> Bool {
+        switch current {
+        case .text(let text): return text == captured
+        case .empty: return false
+        case .unavailable: return true
+        }
+    }
+
+    /// Chromium and Electron apps only build their accessibility tree when asked; without it a
+    /// password field is invisible to the secure-field check.
+    static func shouldEnableManualAccessibility(bundleID: String, isElectron: Bool) -> Bool {
+        blindPasteApps.contains(bundleID) || isElectron
+    }
+
+    /// Apps where a password field may not show up as one (see above, plus terminal prompts). With
+    /// secure input on there, the text is not sent to the AI server: it could be a password.
+    static func secureFieldMayBeInvisible(bundleID: String, isElectron: Bool) -> Bool {
+        shouldEnableManualAccessibility(bundleID: bundleID, isElectron: isElectron) || terminals.contains(bundleID)
+    }
+}

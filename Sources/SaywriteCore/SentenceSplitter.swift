@@ -22,7 +22,7 @@ public enum SentenceSplitter {
             }
             current.append(char)
             let lastToken = current.split(separator: " ").last ?? ""
-            let isSentenceEnd = char != "." || !RuleCleaner.isNonTerminalPeriod(lastToken)
+            let isSentenceEnd = char != "." || !RuleCleaner.isNonTerminalPeriod(lastToken, following: text[next...])
             if ".?!".contains(char), isSentenceEnd, next == text.endIndex || text[next] == " " {
                 sentences.append(current.trimmingCharacters(in: .whitespaces))
                 current = ""

@@ -3,6 +3,7 @@ Saywrite includes or uses the following third-party components.
 ================================================================
 FluidAudio (https://github.com/FluidInference/FluidAudio)
 Linked into the app binary. License: Apache License 2.0
+Copyright the FluidAudio authors (FluidInference); upstream's LICENSE carries the unfilled template line below.
 ================================================================
 
                                  Apache License
@@ -206,6 +207,85 @@ Linked into the app binary. License: Apache License 2.0
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+================================================================
+fastcluster (via FluidAudio's FastClusterWrapper)
+Linked into the app binary. License: BSD 2-Clause
+================================================================
+
+Copyright:
+  * Until package version 1.1.23: © 2011 Daniel Müllner <https://danifold.net>
+  * All changes from version 1.1.24 on: © Google Inc. <https://www.google.com>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================
+NemoTextProcessing / text-processing-rs (via FluidAudio)
+Linked into the app binary as a prebuilt xcframework. License: Apache License 2.0
+(full text: see FluidAudio above)
+================================================================
+
+# NemoTextProcessing (text-processing-rs)
+
+The `NemoTextProcessing` binary target is the prebuilt xcframework of
+[`text-processing-rs`](https://github.com/FluidInference/text-processing-rs)
+(v0.3.0), used by `NemoTextNormalizer` for byte-exact NeMo text normalization.
+
+- **Source:** https://github.com/FluidInference/text-processing-rs
+- **License:** Apache License, Version 2.0
+
+Built with the `fst-engine` feature, the xcframework includes and statically
+links the following third-party works. All are permissive (Apache-2.0 / MIT)
+and compatible.
+
+## NVIDIA NeMo Text Processing
+
+The compiled weighted-FST grammars and text-normalization fixtures are derived
+from / copied from NVIDIA NeMo Text Processing (pinned commit
+`1f1263579fe57ba7ed783cad3dddee710fcc5064`).
+
+- **Source:** https://github.com/NVIDIA/NeMo-text-processing
+- **License:** Apache License, Version 2.0
+- **Copyright:** Copyright (c) NVIDIA CORPORATION & AFFILIATES.
+
+## rustfst
+
+Loads and executes the compiled OpenFST grammars.
+
+- **Source:** https://github.com/Garvys/rustfst
+- **License:** MIT OR Apache-2.0
+- **Copyright:** Copyright (c) Alexandre Caulier and the rustfst contributors.
+
+## flate2
+
+Decompresses the bundled gzipped grammars at load time.
+
+- **Source:** https://github.com/rust-lang/flate2-rs
+- **License:** MIT OR Apache-2.0
+- **Copyright:** Copyright (c) Alex Crichton and the flate2 contributors.
+
+## Other Rust dependencies
+
+The xcframework transitively links additional permissive-licensed Rust crates
+(MIT and/or Apache-2.0) via `rustfst` and `flate2` — e.g. `nom`,
+`miniz_oxide`, `bitflags`, `anyhow`. See the crate's `THIRD-PARTY-LICENSES.md`
+for detail.
+
+Full texts: Apache-2.0 <https://www.apache.org/licenses/LICENSE-2.0>,
+MIT <https://opensource.org/license/mit>.
+
+================================================================
+VBx (clustering approach used by FluidAudio's offline diarizer)
+License: Apache License 2.0 (full text: see FluidAudio above)
+================================================================
+
+Copyright 2021-2024 BUT Speech@FIT (original VBx project)
 
 ================================================================
 Models downloaded at first launch (not bundled)

@@ -24,7 +24,5 @@ jobs:
           name: Saywrite
           path: build/Saywrite.zip
           retention-days: 30
-      - name: Rules-only eval (no LLM on the runner, informational)
-        run: |
-          swift run -c release SaywriteEval Tests/Eval/cases.json --no-ai | tail -1
-          swift run -c release SaywriteEval Tests/Eval/cases-en.json --no-ai | tail -1
+      - name: Rules-only eval (no LLM on the runner, fails below Tests/Eval/rules-baseline.txt)
+        run: scripts/eval-rules.sh

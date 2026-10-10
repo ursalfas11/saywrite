@@ -166,11 +166,10 @@ public actor DictationSession {
                 do {
                     guard !breaker.isOpen else { throw LLMError.unreachable }
                     let improved = try await llm.cleanup(text: combined, style: style, language: language)
-                    Debug.log("llm (with previous sentence): \(combined) -> \(improved)")
+                    Debug.log("llm (with previous sentence): \(Debug.text(combined)) -> \(Debug.text(improved))")
                     // Returning only the discarded sentence means the model misunderstood.
                     guard !LLMOutputGuard.sameWords(improved, previous),
-                          !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved),
-                          Self.keepsCorrectedNumbers(combined, improved, language)
+                          Self.acceptsCorrection(combined, improved, language)
                     else { throw LLMError.rejectedOutput }
                     output.append(RuleCleaner.clean(improved, language: language))
                     usedLLM = true
@@ -196,12 +195,11 @@ public actor DictationSession {
             do {
                 guard !breaker.isOpen else { throw LLMError.unreachable }
                 let improved = try await llm.cleanup(text: unit, style: style, language: language)
-                Debug.log("llm: \(unit) -> \(improved)")
+                Debug.log("llm: \(Debug.text(unit)) -> \(Debug.text(improved))")
                 // Without a correction the model may only add punctuation; changed words fall back.
                 guard isCorrection || LLMOutputGuard.sameWords(unit, improved) else { throw LLMError.rejectedOutput }
-                guard !LLMOutputGuard.removedOnlyMarkers(input: unit, output: improved) else { throw LLMError.rejectedOutput }
                 // The corrected numbers must be in the result, otherwise the model kept the wrong version.
-                guard Self.keepsCorrectedNumbers(unit, improved, language) else { throw LLMError.rejectedOutput }
+                guard Self.acceptsCorrection(unit, improved, language, isCorrection: isCorrection) else { throw LLMError.rejectedOutput }
                 output.append(RuleCleaner.clean(improved, language: language))
                 usedLLM = true
             } catch {
@@ -257,10 +255,9 @@ public actor DictationSession {
             do {
                 guard !breaker.isOpen else { throw LLMError.unreachable }
                 let improved = try await llm.cleanup(text: combined, style: style, language: language)
-                Debug.log("llm (across pause): \(combined) -> \(improved)")
+                Debug.log("llm (across pause): \(Debug.text(combined)) -> \(Debug.text(improved))")
                 guard !LLMOutputGuard.sameWords(improved, units[index - 1]),
-                      !LLMOutputGuard.removedOnlyMarkers(input: combined, output: improved),
-                      Self.keepsCorrectedNumbers(combined, improved, language)
+                      Self.acceptsCorrection(combined, improved, language)
                 else { throw LLMError.rejectedOutput }
                 units[index - 1] = RuleCleaner.clean(improved, language: language)
                 units.remove(at: index)
@@ -298,6 +295,14 @@ public actor DictationSession {
         completed.removeAll()
     }
 
+    /// All checks for an answer to a text with a self-correction. `isCorrection` is false for a long
+    /// passage that only went to the model for punctuation: it keeps the marker-only and number checks.
+    static func acceptsCorrection(_ input: String, _ output: String, _ language: DictationLanguage, isCorrection: Bool = true) -> Bool {
+        guard !LLMOutputGuard.removedOnlyMarkers(input: input, output: output),
+              keepsCorrectedNumbers(input, output, language) else { return false }
+        return !isCorrection || LLMOutputGuard.keepsCorrectionStructure(input: input, output: output)
+    }
+
     /// The corrected numbers must be in the result, and at least one word that is new in the corrected
     /// version, otherwise the model kept the old one ("am Montag nein am Dienstag" -> "am Montag" is
     /// refused). Synonyms pass ("ich will sechs" -> "ich möchte sechs"), word forms may change.
@@ -306,8 +311,12 @@ public actor DictationSession {
         guard CleanupGate.correctedNumbers(in: input, language: language).allSatisfy(outputNumbers.contains) else { return false }
         let changed = CleanupGate.changedWords(in: input, language: language)
         let outputWords = LLMOutputGuard.words(output)
+        // "sechs" and "6" are the same new value.
         return changed.isEmpty || changed.contains { word in
-            outputWords.contains { $0 == word || LLMOutputGuard.sharesStem($0, word) }
+            outputWords.contains {
+                $0 == word || LLMOutputGuard.sharesStem($0, word)
+                    || (LLMOutputGuard.spokenNumbers[word] != nil && LLMOutputGuard.canonicalNumber($0) == LLMOutputGuard.canonicalNumber(word))
+            }
         }
     }
 

@@ -20,6 +20,11 @@ public enum RuleCleaner {
         "much", "many", "blah", "bla", "far", "hey", "knock", "chop", "more", "again", "over", "round", "on",
     ]
     static let englishDoubles: Set<String> = ["that", "had", "is"]
+    /// Words before "period" that make it the noun ("the grace period", "a waiting period").
+    static let englishPeriodModifiers: Set<String> = [
+        "grace", "waiting", "time", "trial", "probation", "notice", "cooling", "billing", "warranty", "return",
+        "reporting", "test", "long", "short", "whole", "entire", "brief", "certain", "given", "same", "this", "that",
+    ]
     /// Words before a command phrase that make it content ("the comma", "our new line of shoes").
     static let englishDeterminers: Set<String> = [
         "the", "a", "an", "this", "that", "my", "your", "his", "her", "our", "their", "its", "no", "one", "any", "each",
@@ -56,14 +61,32 @@ public enum RuleCleaner {
         "e.g.", "i.e.", "vs.", "mr.", "mrs.", "ms.", "no.", "approx.", "a.m.", "p.m.", "st.", "jr.", "sr.", "inc.", "ltd.",
     ]
 
+    /// Capitalized words that start a new sentence or a correction after a number ("um 5. Nein, um 6.",
+    /// "Hauptstraße 12. Ach nein"). After any other capitalized word a number plus period stays an
+    /// ordinal, because German nouns are capitalized ("die 3. Etage", "am 5. Oktober").
+    static let sentenceStartsAfterNumber: Set<String> = [
+        "nein", "nee", "ach", "oder", "moment", "warte", "quatsch", "ich", "aber", "also", "vergiss", "sorry", "dann",
+        "no", "wait", "actually", "oops", "never", "scratch", "i", "we", "but", "so", "then",
+    ]
+
+    /// The first word of `text` (leading whitespace skipped).
+    static func firstWord(of text: Substring) -> Substring {
+        text.drop(while: { $0.isWhitespace }).prefix(while: { !$0.isWhitespace })
+    }
+
     /// True when the period at the end of `token` does not end a sentence (abbreviation, ordinal).
-    static func isNonTerminalPeriod(_ token: Substring) -> Bool {
+    /// `following` is the text after the period; a number followed by a capitalized sentence starter
+    /// ends the sentence instead of being an ordinal.
+    static func isNonTerminalPeriod(_ token: Substring, following: Substring = "") -> Bool {
         let lower = token.lowercased()
         if abbreviations.contains(lower) { return true }
         // Letter-dot abbreviations: u.s., u.k., e.u., i.e.
         if lower.range(of: #"^(?:\p{L}\.){2,}$"#, options: .regularExpression) != nil { return true }
         let body = lower.dropLast()
-        return !body.isEmpty && body.allSatisfy(\.isNumber)
+        guard !body.isEmpty, body.allSatisfy(\.isNumber) else { return false }
+        let next = firstWord(of: following)
+        if next.first?.isUppercase == true, sentenceStartsAfterNumber.contains(normalizeToken(String(next))) { return false }
+        return true
     }
 
     static let numberWords: Set<String> = [
@@ -91,8 +114,8 @@ public enum RuleCleaner {
     static func removeFillers(_ text: String, language: DictationLanguage = .german) -> String {
         let alternation = fillers(language).map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
         let clauseStarts = language == .english
-            ? "that|which|who|because|if|when|but|no|sorry|i mean|or"
-            : "ob|dass|weil|wenn|als|obwohl|damit|sodass|wie|was|wo|warum|welche[rsn]?|der|die|das|den|dem|aber|sondern|denn|nein|nee|ne|also|sorry|oder|ich meine|besser"
+            ? "that|which|who|because|if|when|but|no|sorry|i mean|or|i|we|he|she|they|maybe|perhaps|then|actually"
+            : "ob|dass|weil|wenn|als|obwohl|damit|sodass|wie|was|wo|warum|welche[rsn]?|der|die|das|den|dem|aber|sondern|denn|nein|nee|ne|also|sorry|oder|ich meine|besser|ich|wir|er|man|vielleicht|dann"
         // ", äh," between two parts of a sentence: the commas only mark the hesitation, unless a
         // subordinate clause follows, which needs its comma ("fragen, ob").
         var result = text.replacingOccurrences(
@@ -106,8 +129,13 @@ public enum RuleCleaner {
         let casedAlternation = fillers(language).map { word in
             "(?:" + NSRegularExpression.escapedPattern(for: word) + "|" + NSRegularExpression.escapedPattern(for: word.prefix(1).uppercased() + word.dropFirst()) + ")"
         }.joined(separator: "|")
+        // A filler at the start of a sentence takes its period with it ("Ähm. Also ..."); anywhere else
+        // the period or question mark stays as the sentence end ("morgen äh. Dann").
         result = result.replacingOccurrences(
-            of: #"(?<![\p{L}\p{N}-])(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,.…]*"#,
+            of: #"(?:^|(?<=[.?!] ))(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,.…]*\s*"#,
+            with: "", options: .regularExpression)
+        result = result.replacingOccurrences(
+            of: #"(?<![\p{L}\p{N}-])(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,…]*"#,
             with: "", options: .regularExpression)
         // "Em," / "Äm," at the very start of a dictation.
         result = result.replacingOccurrences(
@@ -118,10 +146,11 @@ public enum RuleCleaner {
                 of: #"(?<![\p{L}\p{N}-])(?:em|emm|äm|ämm|öm|ähem)(?![\p{L}\p{N}-])[,.…]*"#,
                 with: "", options: .regularExpression)
             // Parakeet sometimes renders "ähm" as a lone capital M inside a sentence. Keep real letters:
-            // "Größe M oder L", "M wie Martha".
+            // "Größe M oder L", "M wie Martha", "Variante M ist günstiger". Only after a lowercase word
+            // (verb, adverb) or a comma; a capitalized word before it is almost always a noun it labels.
             result = result.replacingOccurrences(
-                of: #"(?<=[\p{Ll},] )(?<!(?i:größe|typ|klasse|buchstabe|gruppe) )Mm?(?= \p{Ll})(?! (?:wie|oder|und)\b)"#,
-                with: "", options: .regularExpression)
+                of: #"((?<![\p{L}\p{N}-])\p{Ll}[\p{L}]*|,) (?<!(?i:größe|typ|klasse|buchstabe|gruppe|variante|modell|paket|stufe|format|version|kategorie|plan|set) )Mm?(?= \p{Ll})(?! (?:wie|oder|und)\b)"#,
+                with: "$1", options: .regularExpression)
         }
         result = tidyAfterRemoval(result)
         return result
@@ -263,8 +292,9 @@ public enum RuleCleaner {
             result = result.replacingOccurrences(of: pattern, with: symbol, options: .regularExpression)
         }
         // "period" only as a command at the end or right before a line break ("a period of time" stays).
+        let periodNoun = #"(?<!\b(?i:"# + englishPeriodModifiers.union(englishDeterminers).sorted().joined(separator: "|") + #") )"#
         result = result.replacingOccurrences(
-            of: #"[ \t]*[,.]?[ \t]*\b(?i:period)\b[.]?(?=\s*$|\s+(?i:new|next) (?i:line|paragraph))"#,
+            of: #"[ \t]*[,.]?[ \t]*"# + periodNoun + #"\b(?i:period)\b[.]?(?=\s*$|\s+(?i:new|next) (?i:line|paragraph))"#,
             with: ".", options: .regularExpression)
         for (phrase, replacement) in [(#"new paragraph"#, "\n\n"), (#"(?:new|next) line"#, "\n")] {
             result = result.replacingOccurrences(
@@ -346,7 +376,9 @@ public enum RuleCleaner {
     static func expandShortForms(_ text: String, forms: [(String, String)]) -> String {
         var result = text
         for (short, long) in forms {
-            let pattern = #"(?<![\p{L}'-])"# + NSRegularExpression.escapedPattern(for: short) + #"(?![\p{L}'-])"#
+            // "'ve gotta" follows a letter by design ("I've gotta"); other forms must not.
+            let lookbehind = short.hasPrefix("'ve") ? #"(?<![-'])"# : #"(?<![\p{L}'-])"#
+            let pattern = lookbehind + NSRegularExpression.escapedPattern(for: short) + #"(?![\p{L}'-])"#
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
             let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed()
             for match in matches {
@@ -384,6 +416,13 @@ public enum RuleCleaner {
                 continue
             }
             if capitalizeNext, char.isLetter {
+                // "iPhone", "eBay", "github.com" keep their spelling at a sentence start.
+                if isBrandToken(chars[index...].prefix { !$0.isWhitespace }) {
+                    output.append(char)
+                    capitalizeNext = false
+                    pendingEnd = false
+                    continue
+                }
                 output.append(contentsOf: char.uppercased())
                 capitalizeNext = false
                 pendingEnd = false
@@ -393,13 +432,23 @@ public enum RuleCleaner {
             if "?!".contains(char) {
                 pendingEnd = true
             } else if char == "." {
-                pendingEnd = !isNonTerminalPeriod(Substring(String(chars[tokenStart...index])))
+                let following = String(chars[(index + 1)..<min(index + 25, chars.count)])
+                pendingEnd = !isNonTerminalPeriod(Substring(String(chars[tokenStart...index])), following: Substring(following))
             } else if !"\"'„“»«()".contains(char) {
                 pendingEnd = false
                 capitalizeNext = false
             }
         }
         return output
+    }
+
+    /// A token that starts lowercase on purpose: a capital inside ("iPhone", "eBay", "iOS") or a domain
+    /// ("github.com"). Abbreviations like "z.B." do not count.
+    static func isBrandToken(_ token: some Sequence<Character>) -> Bool {
+        let text = String(token)
+        guard text.first?.isLowercase == true else { return false }
+        return text.range(of: #"^\p{Ll}\p{L}*\p{Lu}"#, options: .regularExpression) != nil
+            || text.range(of: #"^[\p{L}\p{N}-]+\.\p{L}{2,}"#, options: .regularExpression) != nil
     }
 
     static func ensureTerminalPunctuation(_ text: String, style: Style) -> String {
@@ -432,8 +481,15 @@ public enum RuleCleaner {
         result = result.replacingOccurrences(of: #",\s*([.?!])"#, with: "$1", options: .regularExpression)
         // Leading comma at the start of text or line.
         result = result.replacingOccurrences(of: #"(?m)^[ \t]*,\s*"#, with: "", options: .regularExpression)
-        // Comma directly after sentence end: ". , so" -> ". so"
-        result = result.replacingOccurrences(of: #"([.?!])\s*,"#, with: "$1", options: .regularExpression)
+        // Comma directly after sentence end: ". , so" -> ". so". Not after an abbreviation or an
+        // ordinal ("usw., das", "am 12., 14. und 15."), where the comma is real.
+        guard let regex = try? NSRegularExpression(pattern: #"([^\s,]*[.?!])\s*,"#) else { return result }
+        for match in regex.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed() {
+            guard let range = Range(match.range, in: result), let tokenRange = Range(match.range(at: 1), in: result) else { continue }
+            let token = result[tokenRange]
+            if token.hasSuffix("."), isNonTerminalPeriod(token) { continue }
+            result.replaceSubrange(range, with: token)
+        }
         return result
     }
 

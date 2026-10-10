@@ -211,13 +211,19 @@ final class CircuitBreakerTests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
 
+    /// A rejected answer or a client error says nothing about the next sentence; an unreachable
+    /// server, a missing model (404) or a server error (5xx) do.
     func testBreakerTripsOnlyOnUnavailability() {
         let breaker = LLMCircuitBreaker()
         breaker.record(LLMError.rejectedOutput)
-        breaker.record(LLMError.http(500))
+        breaker.record(LLMError.http(400))
+        breaker.record(LLMError.http(429))
         XCTAssertFalse(breaker.isOpen)
-        breaker.record(LLMError.unreachable)
+        breaker.record(LLMError.http(500))
         XCTAssertTrue(breaker.isOpen)
+        let unreachable = LLMCircuitBreaker()
+        unreachable.record(LLMError.unreachable)
+        XCTAssertTrue(unreachable.isOpen)
     }
 }
 
@@ -245,5 +251,16 @@ final class PrivacyTests: XCTestCase {
             summary: ChangeSummarizer.summarize(raw: "a", final: "A.", usedLLM: false, llmFailed: false), latency: 0))
         let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
+    }
+}
+
+final class OllamaSessionTests: XCTestCase {
+    func testClientsShareOneSession() {
+        // A session per client would leak its delegate and connection pool.
+        let a = Mirror(reflecting: OllamaClient(configuration: .init())).children.first { $0.label == "session" }?.value as? URLSession
+        let b = Mirror(reflecting: OllamaClient(configuration: .init())).children.first { $0.label == "session" }?.value as? URLSession
+        XCTAssertNotNil(a)
+        XCTAssertTrue(a === b)
+        XCTAssertTrue(a === OllamaClient.sharedSession)
     }
 }

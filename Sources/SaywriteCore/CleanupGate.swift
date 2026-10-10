@@ -18,17 +18,30 @@ public enum CleanupGate {
     /// "ich meine, das passt" do not trigger the model.
     /// Words after "nein," that mean it is an answer or part of the sentence, not a correction
     /// ("Er sagte, nein, das mache ich nicht", "super, ne, dass du kommst").
-    static let notACorrection = #"(?!(?:das|der|die|dem|den|ich|du|er|sie|es|wir|ihr|so|nicht|danke|bitte|dass|oder|nein|nee|ne|und|aber|wirklich)\b)"#
+    static let notACorrection = #"(?!(?:das|der|die|dem|den|ich|du|er|sie|es|wir|ihr|so|nicht|danke|bitte|dass|oder|nein|nee|ne|und|aber|wirklich|vielleicht|mein|meine|dein|deine|unser|unsere|ein|eine|kein|keine|jetzt|schon|schade|wie|was|warum|wieso|wo|wer|da|hier|jemand|alles|nichts|man)\b)"#
+    /// The same without the pronouns: after "Oder nein," a pronoun starts the corrected clause.
+    static let notAnAnswer = #"(?!(?:so|nicht|danke|bitte|dass|oder|nein|nee|ne|und|aber|wirklich|vielleicht)\b)"#
+    /// Words before a comma that make "nein," / "moment," an answer or an opener, not a correction.
+    static let afterOpener = #"(?<!\b(?:ja|hallo|hi|hey|okay|ok|na|also|tja|naja|gut|danke))"#
+    /// Verbs that introduce a quotation: "Er sagte, nein, das mache ich nicht".
+    static let quoteVerbs = #"(?:sagte|sagt|sagen|antwortete|antwortet|meinte|fragte|fragt|rief|schrieb|erwiderte|dachte|denkt)"#
 
     static let correctionPatterns: [String] = [
-        #"[\p{L}\p{N}],\s*(?:(?:also|oder|ach)\s+)?(?:nein|nee|ne)(?:\s+warte)?\s*,\s*"# + notACorrection + #"\S"#,
+        #"[\p{L}\p{N}]"# + afterOpener + #",\s*(?:(?:also|oder|ach)\s+)?(?:(?:nein|nee|ne)\s*,\s*"# + notACorrection
+            + #"|(?:nein|nee|ne)\s+warte\s*,\s*"# + notAnAnswer + #")\S"#,
+        // "Der Termin ist am Dienstag, nein, es ist Mittwoch": a pronoun after the marker starts the new
+        // clause, unless the clause before is a quotation ("Er sagte, nein, das mache ich nicht").
+        #"(?:^|[.!?]\s+)(?![^.!?]*\b"# + quoteVerbs + #"\b)[^.!?]*[\p{L}\p{N}]"# + afterOpener
+            + #",\s*(?:(?:also|oder|ach)\s+)?(?:nein|nee|ne)\s*,\s*(?=(?:ich|es|das|er|sie|wir|du|der|die|den|dem)\b)\S"#,
         #",\s*ich mein(?:e|te)?\b(?!\s+(?:das|es)\s+(?:ernst|so)\b)"#,
         // The recognizer often sets the comma only after the marker: "… bauen ich meine, ich will …".
         #"[\p{L}\p{N}]\s+ich mein(?:e|te)\s*,\s*(?!(?:dass|ob|das|es)\b)\S"#,
         #",\s*besser gesagt\b"#,
         #",\s*oder besser\b"#,
-        #",\s*moment\s*,"#,
-        #",\s*warte\s*,"#,
+        // Not after an opener ("Hallo, Moment, ich komme gleich") and not before a new clause.
+        afterOpener + #",\s*(?:moment|warte)\s*,\s*(?!(?:ich|du|er|sie|es|wir|ihr|man|gleich|kurz|mal|bitte|ja|okay|ok|also|vielleicht|das|dass|hier|jetzt)\b)\S"#,
+        // "… Moment, ich rufe dich lieber an": a clause is a correction when it says "rather".
+        #",\s*(?:moment|warte)\s*,\s*(?:ich|es|wir)\b(?=[^.!?]*\b(?:lieber|doch|eher|stattdessen|besser)\b)\S"#,
         #",\s*quatsch\s*,"#,
         #",\s*(?:sorry|pardon|entschuldigung)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)"#,
         // "um 5 nein um 6" without commas
@@ -41,11 +54,14 @@ public enum CleanupGate {
     /// Sentence start that corrects or throws away the sentence before it. Deliberately narrow:
     /// "Vergiss das Ladekabel nicht", "Warte kurz", "Ich meine, dass …", "Moment mal" stay untouched.
     static let leadingPatterns: [String] = [
-        #"^(?:aber|also|ach|oh|äh|oder)\s+(?:nein|nee|ne)\b\s*,"#,
+        // After "Oh nein," / "Ach nein," a clause is an exclamation ("Oh nein, das Backup fehlt auch").
+        #"^(?:aber|also|ach|oh)\s+(?:nein|nee|ne)\b\s*,\s*"# + notACorrection + #"\S"#,
+        #"^(?:äh|oder)\s+(?:nein|nee|ne)\b\s*,\s*"# + notAnAnswer + #"\S"#,
         #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:vergiss (?:das|es)|(?:streich|lösch) das)\s*[,.!]"#,
         #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:ich meine|besser gesagt|oder besser)\b(?!\s*,?\s*(?:dass|ob|das|es|wir|ich|du|er|sie|man|damit)\b)\s*,?\s*[\p{L}\p{N}]"#,
         #"^(?:sorry|entschuldigung|pardon)\s*,\s*(?:an|am|um|in|im|zu|zum|zur|bei|mit|nach|für|bis|ab|\d)"#,
         #"^(?:warte|moment)(?!\s+mal)\s*,\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|nein|nee|\d)"#,
+        #"^(?:warte|moment)(?!\s+mal)\s*,\s*(?:ich|es|wir)\b(?=[^.!?]*\b(?:lieber|doch|eher|stattdessen|besser)\b)"#,
         #"^(?:quatsch|korrektur)\b\s*[,:!]"#,
     ]
 
@@ -61,7 +77,7 @@ public enum CleanupGate {
     /// the sentence before ("Ich möchte fünf Systeme bauen." + "Ich meine, ich will sechs Systeme bauen.").
     /// Two shared content words tell a correction from an opinion that only starts the same way.
     public static func correctsPrevious(_ sentence: String, previous: String?, language: DictationLanguage = .german) -> Bool {
-        if startsWithCorrection(sentence, language: language) { return true }
+        if startsWithCorrection(sentence, previous: previous, language: language) { return true }
         guard language != .other, let previous, !previous.isEmpty else { return false }
         let lower = sentence.lowercased()
         guard let marker = lower.range(of: language == .english ? englishEchoMarker : echoMarker, options: .regularExpression) else {
@@ -84,30 +100,55 @@ public enum CleanupGate {
     /// "Nein, am Montag kann ich leider nicht" is an answer.
     static let bareNein = #"^(?:nein|nee|ne)\b\s*,?\s*(?:um|am|an|im|in|zum|zur|bis|ab|nach|bei|mit|für|eher|lieber|besser|doch|erst|\d+|null|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\b"#
 
-    public static func startsWithCorrection(_ sentence: String, language: DictationLanguage = .german) -> Bool {
+    /// With `previous`, "Nein, in Berlin regnet es." only counts when the fragment picks up the sentence
+    /// before it (same preposition, or a number or time in it); a bare answer stays as spoken.
+    public static func startsWithCorrection(_ sentence: String, previous: String? = nil, language: DictationLanguage = .german) -> Bool {
         guard language != .other else { return false }
         let lower = sentence.lowercased()
         let leading = language == .english ? englishLeadingPatterns : leadingPatterns
         if leading.contains(where: { lower.range(of: $0, options: .regularExpression) != nil }) { return true }
         let bare = language == .english ? englishBareNo : bareNein
-        return lower.range(of: bare, options: .regularExpression) != nil && wordCount(sentence) <= 6
+        guard let match = lower.range(of: bare, options: .regularExpression), wordCount(sentence) <= 6 else { return false }
+        guard let previous, let lead = lower[match].split(whereSeparator: { !$0.isLetter }).last.map(String.init),
+              prepositions.contains(lead) else { return true }
+        let before = LLMOutputGuard.words(previous)
+        return before.contains(lead) || before.contains { $0.contains(where: \.isNumber) || timeWords.contains($0) }
     }
+
+    static let prepositions: Set<String> = [
+        "um", "am", "an", "im", "in", "zum", "zur", "bis", "ab", "nach", "bei", "mit", "für",
+        "at", "on", "to", "for", "by", "from",
+    ]
+    static let timeWords: Set<String> = [
+        "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag", "morgen", "heute", "abend",
+        "uhr", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "tomorrow", "today",
+        "tonight", "o'clock",
+    ]
 
     // MARK: English
 
     /// Phrases after "actually," / "sorry," that are normal speech, not a correction.
     static let englishIdioms = #"(?!(?:at the moment|at least|at all|at first|in fact|in general|in my|in the end|in case|for now|for example|for sure|for real|to be honest|by the way|on the other hand)\b)"#
 
-    static let englishNotACorrection = #"(?!(?:i|it|that|this|thanks|thank|problem|way|worries|not|no|and|but|you|we|they|he|she|really|please)\b)"#
+    static let englishNotACorrection = #"(?!(?:i|it|that|this|thanks|thank|problem|way|worries|not|no|and|but|you|we|they|he|she|really|please|maybe|the|a|an|my|our|your|their|there|what|why|how|where|who|now|so|just|is|was|are|did|do|does|everything|nothing|someone)\b)"#
+    /// Without the clause openers: after "no wait," a pronoun or "the" starts the corrected text.
+    static let englishNotAnAnswer = #"(?!(?:thanks|thank|problem|way|worries|not|no|and|but|really|please|maybe)\b)"#
+    static let englishAfterOpener = #"(?<!\b(?:yes|yeah|oh|hi|hey|hello|okay|ok|well|so|um|uh|ah|hmm|sure))"#
+    static let englishQuoteVerbs = #"(?:said|says|say|replied|answered|asked|thought|wrote|told|shouted)"#
 
     static let englishCorrectionPatterns: [String] = [
-        #"[\p{L}\p{N}],\s*(?:(?:oh|or)\s+)?no(?:\s+wait)?\s*,\s*"# + englishNotACorrection + #"\S"#,
+        #"[\p{L}\p{N}]"# + englishAfterOpener + #",\s*(?:(?:oh|or)\s+)?(?:no\s*,\s*"# + englishNotACorrection
+            + #"|no\s+wait\s*,\s*"# + englishNotAnAnswer + #")\S"#,
+        // "The deadline is Friday, no, it's Thursday": a pronoun after the marker starts the new clause,
+        // unless the clause before is a quotation ("He said, no, I won't").
+        #"(?:^|[.!?]\s+)(?![^.!?]*\b"# + englishQuoteVerbs + #"\b)[^.!?]*[\p{L}\p{N}]"# + englishAfterOpener
+            + #",\s*(?:(?:oh|or)\s+)?no\s*,\s*(?=(?:i|it|that|this|you|we|they|he|she)\b)\S"#,
         #",\s*i mean\b(?!\s*,?\s*(?:it|that|this|we|i|you|they|he|she|seriously|honestly|really|come on)\b)"#,
         #"[\p{L}\p{N}]\s+i mean\s*,\s*(?!(?:it|that|this|seriously|honestly|really|come on)\b)\S"#,
         #",\s*or rather\b"#,
         #",\s*(?:rather|actually)\s*,?\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,
         #",\s*make (?:that|it)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|ten)\b"#,
-        #",\s*wait\s*,"#,
+        englishAfterOpener + #",\s*wait\s*,\s*(?!(?:i|you|we|it|that|this|he|she|they|what|let|please|just|hold|okay|ok|maybe|so|now)\b)\S"#,
         #",\s*(?:sorry|pardon)\s*,\s*(?:at|on|in|to|for|by|from|\d)"#,
         #"\b(?:at|on|in|by|from)\s+\S+\s+no\s+(?:at|on|in|by|from)\b"#,
         #"\bscratch that\b"#,
@@ -117,7 +158,9 @@ public enum CleanupGate {
     ]
 
     static let englishLeadingPatterns: [String] = [
-        #"^(?:oh|or|actually)\s*,?\s+no\b\s*,"#,
+        #"^(?:or|actually)\s*,?\s+no\b\s*,\s*\S"#,
+        // "Oh no, the backup is gone too" is an exclamation.
+        #"^oh\s*,?\s+no\b\s*,\s*"# + englishNotACorrection + #"\S"#,
         #"^(?:(?:actually|sorry)\s*,?\s+)?(?:scratch that|never mind|forget (?:that|it))\s*[,.!]"#,
         #"^(?:(?:sorry)\s*,?\s+)?(?:i mean|or rather)\b(?!\s*,?\s*(?:that|it|this|i|we|you)\b)\s*,?\s*[\p{L}\p{N}]"#,
         #"^(?:sorry|actually)\s*,\s*"# + englishIdioms + #"(?:at|on|in|to|for|by|from|\d)"#,

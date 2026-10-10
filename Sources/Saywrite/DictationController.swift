@@ -58,6 +58,8 @@ final class DictationController {
     private var prepared = false
     private var previewTask: Task<Void, Never>?
     private var sessionApp: String?
+    /// Cheap check for a password field at the start, so nothing is recorded into one.
+    private var secureProbeTask: Task<Void, Never>?
     private var recordingStart = Date()
     private var lastVoice = Date()
     /// Last inserted dictation that has a rules-only alternative, for the "Original" button.
@@ -66,6 +68,7 @@ final class DictationController {
     /// Hands-free recordings stop by themselves after this much silence, or at the latest here.
     private let silenceStop: TimeInterval = 60
     private let maximumRecording: TimeInterval = 10 * 60
+    private static let historyRetention: TimeInterval = 30 * 86_400
 
     init(settings: AppSettings, state: AppState, overlay: OverlayController, history: HistoryStore) {
         self.settings = settings
@@ -73,6 +76,8 @@ final class DictationController {
         self.overlay = overlay
         self.history = history
         self.hotkeys = HotkeyMonitor(dictateKey: settings.dictateKey, rewriteKey: settings.rewriteKey)
+        // Dictations do not stay on disk indefinitely.
+        history.removeOlder(than: Self.historyRetention)
         state.history = history.items
 
         hotkeys.onEvent = { [weak self] event in self?.handle(event) }
@@ -142,8 +147,13 @@ final class DictationController {
     }
 
     func refreshOllamaStatus() async {
+        ollamaRefreshGeneration += 1
+        let generation = ollamaRefreshGeneration
         let client = OllamaClient(configuration: settings.ollamaConfiguration)
-        guard let models = await client.installedModels() else {
+        let models = await client.installedModels()
+        // A newer refresh (the address changed meanwhile) owns the status; ignore this late answer.
+        guard generation == ollamaRefreshGeneration else { return }
+        guard let models else {
             state.ollamaState = .unreachable
             state.installedModels = []
             return
@@ -153,6 +163,8 @@ final class DictationController {
         let present = models.contains { $0 == wanted || $0 == wanted + ":latest" }
         state.ollamaState = present ? .ready : .modelMissing
     }
+
+    private var ollamaRefreshGeneration = 0
 
     func applySettings() {
         hotkeys.dictateKey = settings.dictateKey
@@ -209,11 +221,23 @@ final class DictationController {
         prepared = true
         if let llm { Task.detached { await llm.prewarm(forRewrite: action == .rewrite) } }
         if action == .rewrite { selectionTask = Task { await TextInserter.selectedText() } }
+        // Nothing is recorded, transcribed or sent to the AI server for a password field.
+        let id = sessionID
+        secureProbeTask = Task { [weak self] in
+            guard await TextInserter.focusIsSecureField() else { return }
+            guard let self, !Task.isCancelled, self.sessionID == id, case .recording = self.phase else { return }
+            self.hotkeys.reset()
+            self.cancel()
+            self.showError(L("Password field – not recorded", "Passwortfeld – nicht aufgenommen"), action: nil)
+        }
     }
 
     private func begin(_ action: HotkeyAction, handsFree: Bool) {
         guard case .idle = phase else {
-            // Still busy with the previous text: ignore this press completely.
+            // Still busy with the previous text: ignore this press, but say so instead of
+            // letting the user talk into nothing.
+            Debug.log("press ignored: still inserting the previous text")
+            if settings.playSounds { NSSound.beep() }
             hotkeys.reset()
             return
         }
@@ -230,8 +254,13 @@ final class DictationController {
         sessionID = UUID()
         sessionApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let style = settings.styleMap.style(for: sessionApp)
+        // Where a password field may be invisible to Accessibility, secure input is the only hint:
+        // then the text stays in this process (rules only) instead of going to the AI server.
+        let isElectron = NSWorkspace.shared.frontmostApplication.map(TextInserter.isElectron) ?? false
+        let withholdAI = TextInserter.secureInputActive
+            && PasteTargetRules.secureFieldMayBeInvisible(bundleID: sessionApp ?? "", isElectron: isElectron)
         let session = DictationSession(
-            transcriber: transcriber, llm: llm, style: style, appBundleID: sessionApp,
+            transcriber: transcriber, llm: withholdAI ? nil : llm, style: style, appBundleID: sessionApp,
             language: settings.language, replacements: settings.replacements)
         let segmenter = Segmenter(vad: action == .dictate ? vad : nil)
         self.session = session
@@ -337,6 +366,7 @@ final class DictationController {
         chunkStream?.finish()
         chunkConsumer?.cancel()
         selectionTask?.cancel()
+        secureProbeTask?.cancel()
         if let session { Task { await session.cancel() } }
         let wasShown = panelShown
         teardown()
@@ -404,10 +434,7 @@ final class DictationController {
             self.readyForNext(id)
         })
         // Something dictated into a password field is not written to the history file.
-        if outcome != .secureField {
-            history.append(result)
-            state.history = history.items
-        }
+        if outcome != .secureField { appendToHistory(result) }
         switch outcome {
         case .pasted:
             break
@@ -416,10 +443,20 @@ final class DictationController {
         case .appChanged:
             undoCandidate = nil
             overlay.show(.done(Self.appChangedMessage, undo: false))
+        case .copiedSecureInput:
+            undoCandidate = nil
+            overlay.show(.done(Self.secureInputMessage, undo: false))
         case .secureField:
             undoCandidate = nil
             showError(L("Password field – not inserted and not saved", "Passwortfeld – nicht eingefügt und nicht gespeichert"), action: nil)
         }
+    }
+
+    private func appendToHistory(_ result: DictationResult) {
+        guard settings.keepHistory else { return }
+        history.removeOlder(than: Self.historyRetention)
+        history.append(result)
+        state.history = history.items
     }
 
     /// Replace the text just inserted with the version without AI.
@@ -429,17 +466,16 @@ final class DictationController {
         overlay.model.committedText = original
         // ⌘Z only makes sense in the app that received the text; otherwise just offer the original.
         guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == result.appBundleID else {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(original, forType: .string)
+            TextInserter.copy(original)
             overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
             return
         }
         TextInserter.undo()
         Task {
             try? await Task.sleep(nanoseconds: 120_000_000)
-            switch await TextInserter.insert(original, expectedApp: result.appBundleID) {
+            switch await TextInserter.insert(original, expectedApp: result.appBundleID, recordsUndo: false) {
             case .pasted: overlay.show(.done(L("Original inserted", "Original eingefügt"), undo: false))
-            case .copiedToClipboard, .appChanged: overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
+            case .copiedToClipboard, .appChanged, .copiedSecureInput: overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
         }
@@ -467,23 +503,34 @@ final class DictationController {
             overlay.model.committedText = instruction
             overlay.model.partialText = ""
             let rewritten = try await llm.rewrite(selection: selection, instruction: instruction)
-            let outcome = await TextInserter.insert(rewritten, expectedApp: app, onPasted: { [weak self] in
-                guard let self else { return }
-                if self.settings.playSounds { self.sounds.playStop() }
-                self.overlay.show(.done(L("Rewritten", "Umformuliert"), undo: false))
-                self.readyForNext(id)
-            })
+            // The selection may have changed while the model worked: then the paste would overwrite
+            // other text, so the rewrite is copied instead.
+            let stillSelected = PasteTargetRules.rewriteMayReplace(captured: selection, current: await TextInserter.currentSelection())
+            let outcome: InsertOutcome
+            var selectionChanged = false
+            if stillSelected {
+                outcome = await TextInserter.insert(rewritten, expectedApp: app, onPasted: { [weak self] in
+                    guard let self else { return }
+                    if self.settings.playSounds { self.sounds.playStop() }
+                    self.overlay.show(.done(L("Rewritten", "Umformuliert"), undo: false))
+                    self.readyForNext(id)
+                })
+            } else {
+                TextInserter.copy(rewritten)
+                selectionChanged = true
+                outcome = .copiedToClipboard
+            }
             let summary = ChangeSummarizer.summarize(raw: selection, final: rewritten, usedLLM: true, llmFailed: false)
             let result = DictationResult(
-                raw: "[\(instruction)] \(selection)", final: rewritten, style: .neutral,
+                raw: HistoryStore.rewriteRaw(instruction: instruction), final: rewritten, style: .neutral,
                 appBundleID: app, summary: summary, latency: 0)
-            if outcome != .secureField {
-                history.append(result)
-                state.history = history.items
-            }
+            if outcome != .secureField { appendToHistory(result) }
             switch outcome {
             case .pasted: break
+            case .copiedToClipboard where selectionChanged:
+                overlay.show(.done(L("Selection changed – rewrite copied, press ⌘V", "Markierung geändert – Umformulierung kopiert, ⌘V drücken"), undo: false))
             case .copiedToClipboard: overlay.show(.done(L("Rewritten – copied, press ⌘V", "Umformuliert – kopiert, ⌘V drücken"), undo: false))
+            case .copiedSecureInput: overlay.show(.done(Self.secureInputMessage, undo: false))
             case .appChanged: overlay.show(.done(Self.appChangedMessage, undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
@@ -492,6 +539,10 @@ final class DictationController {
         } catch {
             showError(L("AI not reachable – text unchanged", "KI nicht erreichbar – Text unverändert"), action: nil)
         }
+    }
+
+    private static var secureInputMessage: String {
+        L("Secure input active – copied, press ⌘V", "Gesicherte Eingabe aktiv – kopiert, ⌘V drücken")
     }
 
     private static var appChangedMessage: String {
@@ -509,6 +560,7 @@ final class DictationController {
         chunkStream = nil
         chunkConsumer = nil
         selectionTask = nil
+        secureProbeTask = nil
         previewTask = nil
     }
 
@@ -522,12 +574,22 @@ final class DictationController {
 
     /// Paste the most recent dictation again at the cursor.
     func pasteLast() {
-        guard let last = history.items.first else { return }
+        guard let last = history.items.first else {
+            overlay.show(.done(L("Nothing to paste (history empty or off)", "Nichts einzufügen (Verlauf leer oder aus)"), undo: false))
+            return
+        }
+        // Not while a dictation is recording or being inserted: it would paste in between and mix up
+        // the clipboard handling of that session.
+        guard case .idle = phase else {
+            overlay.show(.done(L("Busy – try again in a moment", "Gerade beschäftigt – gleich nochmal versuchen"), undo: false))
+            return
+        }
         Task {
             // Give the menu time to close so the previous app has focus again.
             try? await Task.sleep(nanoseconds: 250_000_000)
-            switch await TextInserter.insert(last.final) {
+            switch await TextInserter.insert(last.final, recordsUndo: false) {
             case .pasted: break
+            case .copiedSecureInput: overlay.show(.done(Self.secureInputMessage, undo: false))
             case .copiedToClipboard, .appChanged: overlay.show(.done(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }

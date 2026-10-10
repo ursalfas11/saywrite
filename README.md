@@ -52,7 +52,7 @@ Most dictation apps run every sentence you say through a language model. That is
 | **Spoken commands** | comma, question mark, exclamation mark, colon, semicolon, open/close quote, open/close paren, new line, new paragraph. The German equivalents work too. |
 | **Knows what to leave alone** | "The comma is missing", "a new line of credit", "I think that that is right", e-mail addresses, URLs and abbreviations like "e.g." stay exactly as spoken. |
 | **Safe AI** | A guard rejects model output that answers your question instead of transcribing it, invents text, or loses a number you corrected to. You then get the rule-cleaned version. Rewrites are checked too: a chat preamble is stripped, and an essay or an echoed instruction leaves your text unchanged. If Ollama times out once, the rest of that dictation goes without AI instead of waiting again for every sentence. |
-| **Never loses a word** | If Ollama is down or slow, the rules-only text is inserted. If you switch to another app while the text is being prepared, it is copied instead of landing in the wrong window. "Nothing heard" and a silent microphone are reported, and your recent dictations are kept in the history (readable by your user only). Password fields are detected: nothing is inserted there, and that dictation is not saved. |
+| **Never loses a word** | If Ollama is down or slow, the rules-only text is inserted. If you switch to another app while the text is being prepared, it is copied instead of landing in the wrong window. "Nothing heard" and a silent microphone are reported, and your recent dictations are kept in the history (readable by your user only). Password fields are detected: nothing is recorded or inserted there, and that dictation is not saved. Where an app hides its password field from Accessibility (some browsers, terminals), secure input is the only hint: the dictation is then kept off the AI server and copied for ⌘V instead of pasted. The history lives on disk for 30 days at most and can be turned off in Settings; a rewrite stores only your instruction, never the selected text. |
 | **Your microphone** | Pick any input device. Switching to AirPods mid-dictation is handled. |
 | **Hands-free safety** | A forgotten recording stops by itself after 60 s of silence. |
 
@@ -68,12 +68,12 @@ Measured with the real models, on a MacBook with 8 GB RAM.
 | Two sentences with a correction (8 s) | – | 0.24 s |
 | Four sentences with pauses (17 s) | 0.09–0.13 s | – |
 
-**Text quality** (`make eval`, realistic recognizer output typed into the eval sets and run through the full pipeline with the local LLM; the speech model itself is not part of this measurement):
+**Text quality** (`make eval` runs both sets, realistic recognizer output typed into the eval sets and run through the full pipeline with the local LLM; the speech model itself is not part of this measurement):
 
 | Test set | Cases | Exactly right |
 |---|---|---|
 | English | 130 | ~90 % |
-| German | 107 | ~90 % |
+| German | 112 | ~90 % |
 
 The sets cover everyday messages, e-mails, self-corrections of many shapes, sentences that must not change, numbers, dates, URLs, math, spoken commands and all three styles.
 
@@ -119,6 +119,8 @@ flowchart LR
 
 Each release lists the SHA-256 of the zip next to it.
 
+**Signing trade-off.** The app is signed ad hoc with a requirement on the bundle identifier (`dev.saywrite.app`) only, so macOS keeps the Accessibility and Microphone permissions when you update or rebuild. The flip side: macOS trusts any binary that carries that identifier, so other code running as your user could sign itself the same way and inherit those permissions. Closing this needs a Developer ID certificate (team-bound requirement, hardened runtime, notarization), which is on the roadmap. Until then, install Saywrite only from this repository's releases or your own build, and verify the SHA-256.
+
 ### Build from source
 
 Needs Xcode 16+ (the Command Line Tools alone cannot build the SwiftUI app).
@@ -156,13 +158,14 @@ Everything else is in the menu bar icon → **Settings**: keys, microphone, lang
 
 - **Bigger model for rewriting:** choose, for example, `qwen2.5:7b` under *Model (rewrite)* if you have the RAM. Dictation cleanup stays on the small, fast model.
 - **Less AI in an app:** set that app to *Casual*, which uses AI only for explicit self-corrections, or switch AI off entirely in the menu.
-- **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call. The log contains your dictated text, so delete it when you are done.
+- **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call, without your dictated text (only its length). Add `SAYWRITE_DEBUG_TEXT=1` to log the text as well; that log contains your dictations, so delete it when you are done.
 
 ## Development
 
 ```bash
 make test                   # unit tests for the text pipeline
-make eval                   # quality evaluation with the real local LLM (German set)
+make eval                   # quality evaluation with the real local LLM (German and English set)
+make eval-rules             # rules-only eval against the thresholds in Tests/Eval/rules-baseline.txt (what CI runs)
 swift run -c release SaywriteEval Tests/Eval/cases.json --model qwen2.5:7b --report Tests/Eval/results.jsonl
 swift run -c release SaywriteEval Tests/Eval/cases-en.json   # English set
 make run                    # build the .app and launch it

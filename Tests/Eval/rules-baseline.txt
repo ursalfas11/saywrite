@@ -1,0 +1,4 @@
+# Minimum passing cases per eval set with --no-ai (rules only). CI fails when a set drops below.
+# Raise a number when the rules improve; lower it only on purpose, in the commit that causes the drop.
+cases.json 73
+cases-en.json 100

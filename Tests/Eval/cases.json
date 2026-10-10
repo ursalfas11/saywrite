@@ -898,5 +898,29 @@
 "Das Konzert war laut. Ich meine, ich fand es trotzdem schön."
 ],
 "expected": "Das Konzert war laut. Ich meine, ich fand es trotzdem schön."
+},
+{
+"id": "r5-m1",
+"style": "neutral",
+"segs": [
+"Der Server ist ausgefallen. Oh nein, das Backup fehlt auch."
+],
+"expected": "Der Server ist ausgefallen. Oh nein, das Backup fehlt auch."
+},
+{
+"id": "r5-m2",
+"style": "neutral",
+"segs": [
+"Wie ist das Wetter? Nein, in Berlin regnet es."
+],
+"expected": "Wie ist das Wetter? Nein, in Berlin regnet es."
+},
+{
+"id": "r5-c1",
+"style": "neutral",
+"segs": [
+"Der Termin ist am Dienstag, nein, es ist Mittwoch."
+],
+"expected": "Der Termin ist am Mittwoch.||Der Termin ist Mittwoch."
 }
 ]

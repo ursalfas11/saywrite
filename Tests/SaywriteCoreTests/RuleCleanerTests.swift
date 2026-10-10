@@ -95,4 +95,45 @@ final class SentenceSplitterTests: XCTestCase {
                        "Bitte bring die Folien mit, und schick mir die Zahlen.")
         XCTAssertEqual(RuleCleaner.clean("Ich brauche Größe M."), "Ich brauche Größe M.")
     }
+
+    // MARK: - Round 1 review findings (rules)
+
+    func testEnglishPeriodNounIsKept() {
+        XCTAssertEqual(RuleCleaner.clean("What is the waiting period.", language: .english), "What is the waiting period.")
+        XCTAssertEqual(RuleCleaner.clean("It is the grace period.", language: .english), "It is the grace period.")
+        XCTAssertEqual(RuleCleaner.clean("Thanks for the help period", language: .english), "Thanks for the help.")
+    }
+
+    func testCommaAfterOrdinalAndAbbreviationSurvives() {
+        XCTAssertEqual(RuleCleaner.clean("Ich fliege am 12., 14. und 15. Mai nach Rom."), "Ich fliege am 12., 14. und 15. Mai nach Rom.")
+        XCTAssertEqual(RuleCleaner.clean("Äpfel, Birnen usw., das reicht."), "Äpfel, Birnen usw., das reicht.")
+    }
+
+    func testNumberFollowedByCorrectionEndsTheSentence() {
+        XCTAssertEqual(SentenceSplitter.split("Ich komme um 5. Nein, um 6."), ["Ich komme um 5.", "Nein, um 6."])
+        XCTAssertEqual(SentenceSplitter.split("Am 12. Oktober in der 3. Etage."), ["Am 12. Oktober in der 3. Etage."])
+    }
+
+    func testFormalExpandsVeGotta() {
+        XCTAssertEqual(RuleCleaner.finalize("I've gotta leave early today.", style: .formal, language: .english),
+                       "I've got to leave early today.")
+        XCTAssertEqual(RuleCleaner.finalize("We gotta leave.", style: .formal, language: .english), "We have to leave.")
+    }
+
+    func testFillerKeepsSentenceEndAndClauseComma() {
+        XCTAssertEqual(RuleCleaner.clean("Ich komme morgen äh. Dann gehen wir essen."), "Ich komme morgen. Dann gehen wir essen.")
+        XCTAssertEqual(RuleCleaner.clean("Ich weiß nicht, äh, vielleicht morgen."), "Ich weiß nicht, vielleicht morgen.")
+        XCTAssertEqual(RuleCleaner.clean("Ähm. Ich komme."), "Ich komme.")
+    }
+
+    func testCapitalizeKeepsBrandSpelling() {
+        XCTAssertEqual(RuleCleaner.finalize("iPhone 15 ist neu. eBay ist auch gut.", style: .neutral),
+                       "iPhone 15 ist neu. eBay ist auch gut.")
+        XCTAssertEqual(RuleCleaner.finalize("z.B. das hier", style: .neutral), "Z.B. das hier.")
+    }
+
+    func testLoneMKeptAfterProductNoun() {
+        XCTAssertEqual(RuleCleaner.clean("Wir nehmen Variante M ist günstiger"), "Wir nehmen Variante M ist günstiger")
+        XCTAssertEqual(RuleCleaner.clean("Ich möchte M bestellen bitte"), "Ich möchte bestellen bitte")
+    }
 }
