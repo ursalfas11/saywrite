@@ -1,6 +1,7 @@
 import AppKit
 import FluidAudio
 import SaywriteCore
+import SaywriteLlama
 
 /// Observable app status for the menu and settings window.
 @MainActor
@@ -20,6 +21,7 @@ final class AppState: ObservableObject {
 
     @Published var modelState: ModelState = .loading(0)
     @Published var ollamaState: OllamaState = .unknown
+    @Published var builtinState: BuiltinModelState = .initial(for: ModelStore().status(.qwen25_3b))
     @Published var accessibilityGranted = Permissions.accessibilityGranted
     @Published var microphoneGranted = Permissions.microphoneStatus == .granted
     @Published var history: [DictationResult] = []
@@ -36,6 +38,9 @@ final class DictationController {
     let hotkeys: HotkeyMonitor
 
     private let transcriber = ParakeetTranscriber()
+    private let modelStore = ModelStore()
+    private let modelSpec = ModelSpec.qwen25_3b
+    private var downloadTask: Task<Void, Never>?
     private var vad: VadManager?
     private let audio = AudioCapture()
     private let sounds = Sounds()
@@ -60,6 +65,10 @@ final class DictationController {
     private var sessionApp: String?
     /// Cheap check for a password field at the start, so nothing is recorded into one.
     private var secureProbeTask: Task<Void, Never>?
+    /// The probe of this session found a password field.
+    private var secureFieldSeen = false
+    /// Secure input hides a possible password field from Accessibility: the AI server gets nothing.
+    private var sessionWithholdAI = false
     private var recordingStart = Date()
     private var lastVoice = Date()
     /// Last inserted dictation that has a rules-only alternative, for the "Original" button.
@@ -119,7 +128,8 @@ final class DictationController {
     func start() {
         hotkeys.start()
         Task { await loadModels() }
-        Task { await refreshOllamaStatus() }
+        refreshBuiltinState()
+        if settings.llmBackend == .ollama { Task { await refreshOllamaStatus() } }
     }
 
     private func loadModels() async {
@@ -166,6 +176,132 @@ final class DictationController {
 
     private var ollamaRefreshGeneration = 0
 
+    // MARK: - Built-in model
+
+    /// Reads the model file's state from disk, unless a download or the first load is running.
+    func refreshBuiltinState() {
+        guard !state.builtinState.isBusy else { return }
+        state.builtinState = .initial(for: modelStore.status(modelSpec))
+    }
+
+    /// Downloads the model (or continues an interrupted download). Only ever started by a click.
+    func downloadBuiltinModel() {
+        guard !state.builtinState.isBusy else { return }
+        let spec = modelSpec
+        let store = modelStore
+        state.builtinState = .downloading(Double(store.partialBytes(spec)) / Double(spec.size))
+        let pendingDelete = deleteTask
+        let retired = retiredDownload
+        downloadGeneration += 1
+        let generation = downloadGeneration
+        downloadTask = Task {
+            // A delete that is still queued behind the engine must finish first, or it would remove
+            // the files of this download. So must a download that a delete cancelled: it may still
+            // be winding down on the same .part file.
+            await retired?.value
+            await pendingDelete?.value
+            // Whatever this task writes below counts only while it is the current download.
+            let isCurrent = { self.downloadGeneration == generation }
+            guard isCurrent() else { return }
+            do {
+                let url = try await ModelDownloader(spec: spec, store: store).run { phase in
+                    Task { @MainActor in if isCurrent() { self.applyDownload(phase) } }
+                }
+                guard isCurrent() else { return }
+                // Load the model once now: the first run on a Mac compiles the Metal kernels, which
+                // would otherwise delay the first dictation.
+                if settings.llmBackend == .builtin {
+                    state.builtinState = .optimizing
+                    let loaded = await LlamaEngine.shared.prewarm(modelURL: url, language: prewarmLanguage, forRewrite: false)
+                    // Deleted while the model was being optimized: the delete owns the state now.
+                    guard isCurrent() else { return }
+                    if settings.llmBackend != .builtin {
+                        // Switched to Ollama during the prewarm: the engine unloads the model again.
+                        state.builtinState = .initial(for: store.status(spec))
+                    } else {
+                        // Failed only when the load itself failed; an unload by memory pressure after a
+                        // successful load leaves a valid model that loads again on demand.
+                        state.builtinState = loaded ? .ready : .failed(L("The model could not be loaded", "Das Modell konnte nicht geladen werden"))
+                    }
+                } else {
+                    // Switched to Ollama meanwhile: the model stays on disk, not in memory.
+                    state.builtinState = .initial(for: store.status(spec))
+                }
+            } catch is CancellationError {
+                if isCurrent() { state.builtinState = .initial(for: store.status(spec)) }
+            } catch {
+                Debug.log("model download failed: \(error)")
+                guard isCurrent() else { return }
+                // An interrupted connection leaves the partial file: say so, the button continues it.
+                if (error as? ModelDownloadError) == .incomplete {
+                    state.builtinState = .failed(L("Download interrupted – continue to resume", "Download unterbrochen – Fortsetzen macht weiter"))
+                } else {
+                    state.builtinState = .failed(error.localizedDescription)
+                }
+            }
+            if isCurrent() { downloadTask = nil }
+        }
+    }
+
+    /// Bumped by every download and every delete: a task that finds it changed is outdated and
+    /// must not touch the state or `downloadTask`.
+    private var downloadGeneration = 0
+    /// The download a delete cancelled, until the next download has waited for it.
+    private var retiredDownload: Task<Void, Never>?
+
+    private func applyDownload(_ phase: ModelDownloader.Phase) {
+        switch phase {
+        case .downloading(let progress):
+            if case .downloading = state.builtinState { state.builtinState = .downloading(progress.fraction) }
+        case .verifying:
+            // Late updates must not overwrite .optimizing or a finished state.
+            if case .downloading = state.builtinState { state.builtinState = .verifying }
+        }
+    }
+
+    /// Stops a running download; the partial file stays, so it can be continued.
+    func pauseBuiltinDownload() {
+        downloadTask?.cancel()
+    }
+
+    /// Deletes the model file and what is left of a download.
+    private var deleteTask: Task<Void, Never>?
+
+    func deleteBuiltinModel() {
+        downloadTask?.cancel()
+        if let running = downloadTask { retiredDownload = running }
+        downloadTask = nil
+        downloadGeneration += 1
+        let spec = modelSpec
+        let store = modelStore
+        state.builtinState = .notDownloaded
+        let previous = deleteTask
+        deleteTask = Task {
+            await previous?.value
+            await LlamaEngine.shared.unloadThenRun { store.delete(spec) }
+        }
+    }
+
+    /// Called when the backend setting changes: the built-in model leaves memory when Ollama takes over.
+    func backendChanged() {
+        switch settings.llmBackend {
+        case .builtin:
+            refreshBuiltinState()
+        case .ollama:
+            Task { await LlamaEngine.shared.unload() }
+            Task { await refreshOllamaStatus() }
+        }
+    }
+
+    private var prewarmLanguage: DictationLanguage {
+        // Prime the prompt of the language that was dictated last (or the fixed setting).
+        switch settings.language {
+        case "de": return .german
+        case "en": return .english
+        default: return DictationLanguage.lastDetected ?? (UILanguage.isGerman ? .german : .english)
+        }
+    }
+
     func applySettings() {
         hotkeys.dictateKey = settings.dictateKey
         hotkeys.rewriteKey = settings.rewriteKey
@@ -205,27 +341,38 @@ final class DictationController {
 
     private var llm: LLMClient? {
         guard settings.aiEnabled else { return nil }
-        var configuration = settings.ollamaConfiguration
-        // Prime the prompt of the language that was dictated last (or the fixed setting).
-        switch settings.language {
-        case "de": configuration.prewarmLanguage = .german
-        case "en": configuration.prewarmLanguage = .english
-        default: configuration.prewarmLanguage = DictationLanguage.lastDetected ?? (UILanguage.isGerman ? .german : .english)
+        switch settings.llmBackend {
+        case .builtin:
+            return LlamaClient(modelURL: modelStore.fileURL(modelSpec), cleanupTimeout: settings.llmTimeout, prewarmLanguage: prewarmLanguage)
+        case .ollama:
+            var configuration = settings.ollamaConfiguration
+            configuration.prewarmLanguage = prewarmLanguage
+            return OllamaClient(configuration: configuration)
         }
-        return OllamaClient(configuration: configuration)
     }
 
     /// Runs once per session, as soon as it is clear the user really dictates.
     private func prepare(_ action: HotkeyAction) {
         guard !prepared else { return }
         prepared = true
-        if let llm { Task.detached { await llm.prewarm(forRewrite: action == .rewrite) } }
+        if let llm {
+            // Switching the engine in the settings meanwhile must not load the built-in model again.
+            let backend = settings.llmBackend
+            Task.detached { [weak self] in
+                let current = await MainActor.run { self?.settings.llmBackend }
+                guard current == backend else { return }
+                await llm.prewarm(forRewrite: action == .rewrite)
+            }
+        }
         if action == .rewrite { selectionTask = Task { await TextInserter.selectedText() } }
         // Nothing is recorded, transcribed or sent to the AI server for a password field.
         let id = sessionID
         secureProbeTask = Task { [weak self] in
             guard await TextInserter.focusIsSecureField() else { return }
-            guard let self, !Task.isCancelled, self.sessionID == id, case .recording = self.phase else { return }
+            guard let self, !Task.isCancelled, self.sessionID == id else { return }
+            self.secureFieldSeen = true
+            // A short press is already processing: finish() waits for this probe and stops there.
+            guard case .recording = self.phase else { return }
             self.hotkeys.reset()
             self.cancel()
             self.showError(L("Password field – not recorded", "Passwortfeld – nicht aufgenommen"), action: nil)
@@ -252,6 +399,7 @@ final class DictationController {
         }
 
         sessionID = UUID()
+        secureFieldSeen = false
         sessionApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let style = settings.styleMap.style(for: sessionApp)
         // Where a password field may be invisible to Accessibility, secure input is the only hint:
@@ -259,6 +407,7 @@ final class DictationController {
         let isElectron = NSWorkspace.shared.frontmostApplication.map(TextInserter.isElectron) ?? false
         let withholdAI = TextInserter.secureInputActive
             && PasteTargetRules.secureFieldMayBeInvisible(bundleID: sessionApp ?? "", isElectron: isElectron)
+        sessionWithholdAI = withholdAI
         let session = DictationSession(
             transcriber: transcriber, llm: withholdAI ? nil : llm, style: style, appBundleID: sessionApp,
             language: settings.language, replacements: settings.replacements)
@@ -384,6 +533,17 @@ final class DictationController {
         chunkStream?.finish()
         await chunkConsumer?.value
 
+        // A short press reaches this point before the password-field probe answered: wait for it, so
+        // nothing is transcribed or sent to the AI server for a password field.
+        await secureProbeTask?.value
+        if secureFieldSeen, sessionID == id {
+            if let session { await session.cancel() }
+            hotkeys.reset()
+            showError(L("Password field – not recorded", "Passwortfeld – nicht aufgenommen"), action: nil)
+            teardown()
+            return
+        }
+
         switch action {
         case .dictate:
             await finishDictation(id: id)
@@ -433,8 +593,8 @@ final class DictationController {
             self.overlay.show(.done(result.summary.text, undo: undo))
             self.readyForNext(id)
         })
-        // Something dictated into a password field is not written to the history file.
-        if outcome != .secureField { appendToHistory(result) }
+        // A password field, or a possible one (secure input, focus unknown), never goes to the history file.
+        if outcome != .secureField && outcome != .copiedSecureInput { appendToHistory(result) }
         switch outcome {
         case .pasted:
             break
@@ -492,6 +652,11 @@ final class DictationController {
             showError(L("AI is turned off in settings", "KI ist in den Einstellungen aus"), action: nil)
             return
         }
+        // The selection must not reach the AI server where a password field may be invisible.
+        guard !sessionWithholdAI else {
+            showError(L("Secure input active – AI off", "Gesicherte Eingabe aktiv – KI aus"), action: nil)
+            return
+        }
         guard samples.count >= 16_000 / 3,
               let instruction = try? await transcriber.transcribe(samples),
               !instruction.trimmingCharacters(in: .whitespaces).isEmpty
@@ -520,11 +685,7 @@ final class DictationController {
                 selectionChanged = true
                 outcome = .copiedToClipboard
             }
-            let summary = ChangeSummarizer.summarize(raw: selection, final: rewritten, usedLLM: true, llmFailed: false)
-            let result = DictationResult(
-                raw: HistoryStore.rewriteRaw(instruction: instruction), final: rewritten, style: .neutral,
-                appBundleID: app, summary: summary, latency: 0)
-            if outcome != .secureField { appendToHistory(result) }
+            // A rewrite is not written to the history: its result is the user's own document.
             switch outcome {
             case .pasted: break
             case .copiedToClipboard where selectionChanged:
@@ -534,6 +695,8 @@ final class DictationController {
             case .appChanged: overlay.show(.done(Self.appChangedMessage, undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
+        } catch LLMError.tooLong {
+            showError(L("Selection too long for the built-in AI – text unchanged", "Markierung zu lang für die eingebaute KI – Text unverändert"), action: nil)
         } catch LLMError.rejectedOutput {
             showError(L("AI answer did not look like a rewrite – text unchanged", "KI-Antwort war keine Umformulierung – Text unverändert"), action: nil)
         } catch {

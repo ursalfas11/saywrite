@@ -1051,5 +1051,38 @@
    "The server crashed. Oh no, the backup is gone too."
   ],
   "expected": "The server crashed. Oh no, the backup is gone too."
+ },
+ {
+  "id": "r5-f1",
+  "style": "neutral",
+  "segs": [
+   "She left early.",
+   "I mean, she had a train to catch."
+  ],
+  "expected": "She left early. I mean, she had a train to catch."
+ },
+ {
+  "id": "r5-f2",
+  "style": "neutral",
+  "segs": [
+   "He did his best. I mean, he tried hard for months."
+  ],
+  "expected": "He did his best. I mean, he tried hard for months."
+ },
+ {
+  "id": "r5-c1",
+  "style": "neutral",
+  "segs": [
+   "Please get a coffee, no, a tea."
+  ],
+  "expected": "Please get a tea."
+ },
+ {
+  "id": "r5-c2",
+  "style": "neutral",
+  "segs": [
+   "Let's meet Monday, make that Tuesday."
+  ],
+  "expected": "Let's meet Tuesday."
  }
 ]

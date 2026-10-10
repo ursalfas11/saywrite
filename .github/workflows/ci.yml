@@ -12,10 +12,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+      - name: Cache SwiftPM packages and the llama.cpp framework
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build/artifacts
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
       - name: Unit tests
         run: swift test
       - name: Build the app
         run: make app DEVELOPER_DIR="$(xcode-select -p)"
+      - name: Check the embedded llama.framework (signature, rpath, dyld link)
+        run: |
+          codesign --verify --deep --strict build/Saywrite.app
+          otool -l build/Saywrite.app/Contents/MacOS/Saywrite | grep -A2 LC_RPATH | grep "@executable_path/../Frameworks"
+          otool -L build/Saywrite.app/Contents/MacOS/Saywrite | grep llama.framework
+          # Starting the binary makes dyld resolve every framework; this mode renders PNGs and exits. The model is never downloaded in CI.
+          build/Saywrite.app/Contents/MacOS/Saywrite --render-overlay "$RUNNER_TEMP/overlay"
       - name: Pack the app
         # ditto keeps the bundle's permissions and signature; upload-artifact alone would drop the executable bit.
         run: ditto -c -k --keepParent build/Saywrite.app build/Saywrite.zip

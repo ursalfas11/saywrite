@@ -1,6 +1,7 @@
 import FluidAudio
 import Foundation
 import SaywriteCore
+import SaywriteLlama
 import SwiftUI
 import AppKit
 
@@ -10,12 +11,26 @@ import AppKit
 enum SelfTest {
     static func run(arguments: [String]) async -> Int32 {
         guard arguments.count >= 1 else {
-            print("usage: Saywrite --selftest <audio file> [casual|neutral|formal] [--no-ai]")
+            print("usage: Saywrite --selftest <audio file> [casual|neutral|formal] [--no-ai] [--backend llama|ollama]")
             return 2
         }
         let url = URL(fileURLWithPath: arguments[0])
         let style = arguments.dropFirst().compactMap { Style(rawValue: $0) }.first ?? .neutral
         let useAI = !arguments.contains("--no-ai")
+        let store = ModelStore()
+        let modelURL = store.fileURL(.qwen25_3b)
+        let backend: LLMBackend
+        if let index = arguments.firstIndex(of: "--backend"), index + 1 < arguments.count {
+            switch arguments[index + 1] {
+            case "ollama": backend = .ollama
+            case "llama", "builtin": backend = .builtin
+            case let other:
+                print("unknown --backend \(other) (llama or ollama)")
+                return 2
+            }
+        } else {
+            backend = LLMBackend.evalDefault(modelInstalled: store.isInstalled(.qwen25_3b))
+        }
 
         do {
             let loadStart = Date()
@@ -26,7 +41,13 @@ enum SelfTest {
             print(String(format: "models loaded in %.2fs (vad: %@)", Date().timeIntervalSince(loadStart), vad == nil ? "off" : "on"))
 
             let samples = try AudioConverter().resampleAudioFile(url)
-            let llm: LLMClient? = useAI ? OllamaClient(configuration: .init()) : nil
+            let llm: LLMClient?
+            switch (useAI, backend) {
+            case (false, _): llm = nil
+            case (true, .builtin): llm = LlamaClient(modelURL: modelURL)
+            case (true, .ollama): llm = OllamaClient(configuration: .init())
+            }
+            if useAI { print("AI backend: \(backend.rawValue)") }
             if let llm { await llm.prewarm(forRewrite: false) }
 
             let session = DictationSession(transcriber: transcriber, llm: llm, style: style, appBundleID: nil)

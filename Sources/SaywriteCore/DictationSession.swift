@@ -162,16 +162,19 @@ public actor DictationSession {
                     output.append(unit)
                     continue
                 }
-                let combined = Self.joinForCorrection(previous, unit)
+                // A spoken line break in front of the sentence stays out of the model's input and goes
+                // back in front of the answer (the model would trim it).
+                let (lead, previousBody) = Self.splitLeadingBreak(previous)
+                let combined = Self.joinForCorrection(previousBody, Self.splitLeadingBreak(unit).body)
                 do {
                     guard !breaker.isOpen else { throw LLMError.unreachable }
                     let improved = try await llm.cleanup(text: combined, style: style, language: language)
                     Debug.log("llm (with previous sentence): \(Debug.text(combined)) -> \(Debug.text(improved))")
                     // Returning only the discarded sentence means the model misunderstood.
-                    guard !LLMOutputGuard.sameWords(improved, previous),
+                    guard !LLMOutputGuard.sameWords(improved, previousBody),
                           Self.acceptsCorrection(combined, improved, language)
                     else { throw LLMError.rejectedOutput }
-                    output.append(RuleCleaner.clean(improved, language: language))
+                    output.append(lead + RuleCleaner.clean(improved, language: language))
                     usedLLM = true
                 } catch {
                     Debug.log("llm failed: \(error)")
@@ -194,13 +197,14 @@ public actor DictationSession {
             }
             do {
                 guard !breaker.isOpen else { throw LLMError.unreachable }
-                let improved = try await llm.cleanup(text: unit, style: style, language: language)
-                Debug.log("llm: \(Debug.text(unit)) -> \(Debug.text(improved))")
+                let (lead, body) = Self.splitLeadingBreak(unit)
+                let improved = try await llm.cleanup(text: body, style: style, language: language)
+                Debug.log("llm: \(Debug.text(body)) -> \(Debug.text(improved))")
                 // Without a correction the model may only add punctuation; changed words fall back.
-                guard isCorrection || LLMOutputGuard.sameWords(unit, improved) else { throw LLMError.rejectedOutput }
+                guard isCorrection || LLMOutputGuard.sameWords(body, improved) else { throw LLMError.rejectedOutput }
                 // The corrected numbers must be in the result, otherwise the model kept the wrong version.
-                guard Self.acceptsCorrection(unit, improved, language, isCorrection: isCorrection) else { throw LLMError.rejectedOutput }
-                output.append(RuleCleaner.clean(improved, language: language))
+                guard Self.acceptsCorrection(body, improved, language, isCorrection: isCorrection) else { throw LLMError.rejectedOutput }
+                output.append(lead + RuleCleaner.clean(improved, language: language))
                 usedLLM = true
             } catch {
                 Debug.log("llm failed: \(error)")
@@ -251,15 +255,16 @@ public actor DictationSession {
                 index += 1
                 continue
             }
-            let combined = Self.joinForCorrection(units[index - 1], units[index])
+            let (lead, previousBody) = Self.splitLeadingBreak(units[index - 1])
+            let combined = Self.joinForCorrection(previousBody, Self.splitLeadingBreak(units[index]).body)
             do {
                 guard !breaker.isOpen else { throw LLMError.unreachable }
                 let improved = try await llm.cleanup(text: combined, style: style, language: language)
                 Debug.log("llm (across pause): \(Debug.text(combined)) -> \(Debug.text(improved))")
-                guard !LLMOutputGuard.sameWords(improved, units[index - 1]),
+                guard !LLMOutputGuard.sameWords(improved, previousBody),
                       Self.acceptsCorrection(combined, improved, language)
                 else { throw LLMError.rejectedOutput }
-                units[index - 1] = RuleCleaner.clean(improved, language: language)
+                units[index - 1] = lead + RuleCleaner.clean(improved, language: language)
                 units.remove(at: index)
                 usedLLM = true
             } catch {
@@ -312,18 +317,47 @@ public actor DictationSession {
         let changed = CleanupGate.changedWords(in: input, language: language)
         let outputWords = LLMOutputGuard.words(output)
         // "sechs" and "6" are the same new value.
-        return changed.isEmpty || changed.contains { word in
+        func survives(_ word: String) -> Bool {
             outputWords.contains {
                 $0 == word || LLMOutputGuard.sharesStem($0, word)
                     || (LLMOutputGuard.spokenNumbers[word] != nil && LLMOutputGuard.canonicalNumber($0) == LLMOutputGuard.canonicalNumber(word))
             }
         }
+        guard changed.isEmpty || changed.contains(where: survives) else { return false }
+        // The new value comes first after the marker. When it is gone while a word of the old version is
+        // still there ("Morgen früh, nein, übermorgen früh geht es weiter" -> "Morgen früh geht es
+        // weiter"), a trailing word that happens to survive must not vouch for the answer.
+        if let first = changed.first, !survives(first),
+           let old = CleanupGate.replacedWord(in: input, language: language),
+           outputWords.contains(where: { $0 == old || LLMOutputGuard.sharesStem($0, old) }) { return false }
+        // Nouns and names of the new version have no synonym worth the risk: each of them must be there
+        // ("Tinte, Toner, nein, Papier und Stifte" must not become "Tinte, Toner und Stifte").
+        return capitalizedWords(in: input).filter(changed.contains).allSatisfy(survives)
+    }
+
+    /// Lowercased words that are capitalized inside a sentence (German nouns, names, weekdays); the word
+    /// that opens a sentence says nothing about its kind.
+    static func capitalizedWords(in text: String) -> Set<String> {
+        var result: Set<String> = []
+        var startsSentence = true
+        for token in text.split(whereSeparator: { $0.isWhitespace }) {
+            let word = token.trimmingCharacters(in: .punctuationCharacters)
+            if !startsSentence, word.first?.isUppercase == true, word.count >= 3 { result.insert(word.lowercased()) }
+            startsSentence = token.last.map { ".!?".contains($0) } ?? false
+        }
+        return result
     }
 
     /// "Ich komme um fünf." + "Nein, um sechs." or "am Donnerstag" + "nein, am Freitag".
     static func joinForCorrection(_ previous: String, _ correction: String) -> String {
         guard let last = previous.last else { return correction }
         return ".?!,;:".contains(last) ? previous + " " + correction : previous + ", " + correction
+    }
+
+    /// Splits the line breaks a spoken "neue Zeile" put in front of a sentence from the sentence.
+    static func splitLeadingBreak(_ text: String) -> (lead: String, body: String) {
+        let lead = String(text.prefix { $0 == "\n" })
+        return (lead, String(text.dropFirst(lead.count)))
     }
 
     static func dropFalsePeriod(_ text: String) -> String {

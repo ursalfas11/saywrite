@@ -58,7 +58,7 @@ public enum RuleCleaner {
         "z.", "b.", "z.b.", "d.", "h.", "d.h.", "u.", "a.", "u.a.", "usw.", "etc.", "ca.", "bzw.", "vgl.", "nr.", "dr.",
         "prof.", "evtl.", "ggf.", "inkl.", "zzgl.", "bspw.", "mio.", "mrd.", "std.", "min.", "max.", "str.", "tel.",
         "abs.", "art.", "bd.", "jh.", "o.", "ä.", "o.ä.", "s.", "sog.", "u.u.", "v.a.", "z.t.", "e.v.", "gmbh.", "hr.", "fr.",
-        "e.g.", "i.e.", "vs.", "mr.", "mrs.", "ms.", "no.", "approx.", "a.m.", "p.m.", "st.", "jr.", "sr.", "inc.", "ltd.",
+        "i.", "r.", "bzgl.", "mwst.", "ust.", "lt.", "abt.", "hrn.", "tsd.", "mo.", "di.", "mi.", "zt.", "nl.", "kfm.", "dipl.", "geb.", "gem.", "zw.", "e.g.", "i.e.", "vs.", "mr.", "mrs.", "ms.", "no.", "approx.", "a.m.", "p.m.", "st.", "jr.", "sr.", "inc.", "ltd.",
     ]
 
     /// Capitalized words that start a new sentence or a correction after a number ("um 5. Nein, um 6.",
@@ -67,6 +67,13 @@ public enum RuleCleaner {
     static let sentenceStartsAfterNumber: Set<String> = [
         "nein", "nee", "ach", "oder", "moment", "warte", "quatsch", "ich", "aber", "also", "vergiss", "sorry", "dann",
         "no", "wait", "actually", "oops", "never", "scratch", "i", "we", "but", "so", "then",
+    ]
+
+    /// More sentence openers after a short date ("am 13.5. Bitte alle einladen"): a date is rarely
+    /// followed by a capitalized noun, so these end the sentence.
+    static let sentenceStartsAfterDate: Set<String> = [
+        "bitte", "das", "wir", "danke", "der", "die", "es", "hier", "er", "sie", "du", "ihr", "man", "alle", "dazu", "leider",
+        "please", "thanks", "the", "it", "this", "that", "he", "she", "they", "you",
     ]
 
     /// The first word of `text` (leading whitespace skipped).
@@ -83,9 +90,14 @@ public enum RuleCleaner {
         // Letter-dot abbreviations: u.s., u.k., e.u., i.e.
         if lower.range(of: #"^(?:\p{L}\.){2,}$"#, options: .regularExpression) != nil { return true }
         let body = lower.dropLast()
-        guard !body.isEmpty, body.allSatisfy(\.isNumber) else { return false }
+        // A number ("5.") or a short German date ("3.10.", "15.03.", "1.1.2025.").
+        let isShortDate = body.range(of: #"^\d{1,2}\.\d{1,2}(?:\.\d{2,4})?$"#, options: .regularExpression) != nil
+        guard !body.isEmpty, body.allSatisfy(\.isNumber) || isShortDate else { return false }
         let next = firstWord(of: following)
-        if next.first?.isUppercase == true, sentenceStartsAfterNumber.contains(normalizeToken(String(next))) { return false }
+        if next.first?.isUppercase == true {
+            let word = normalizeToken(String(next))
+            if sentenceStartsAfterNumber.contains(word) || (isShortDate && sentenceStartsAfterDate.contains(word)) { return false }
+        }
         return true
     }
 
@@ -111,6 +123,29 @@ public enum RuleCleaner {
         return result
     }
 
+    /// Abbreviation-like words that also end a sentence ("Hallo Max.", "bei der Müller GmbH."): when a
+    /// filler after one is removed, the next word has to take over the capital the filler carried.
+    static let sentenceEndingAbbreviations: Set<String> = ["max.", "min.", "gmbh.", "st.", "fr.", "hr.", "mo.", "di.", "mi.", "inc.", "ltd.", "jr.", "sr."]
+
+    static func removeSentenceStartFillers(_ text: String, casedAlternation: String) -> String {
+        let pattern = #"(?:^|(?<=[.?!] ))(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,.…]*\s*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        var result = text
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            var capitalize = false
+            if range.lowerBound > result.startIndex {
+                let before = result[..<range.lowerBound].split(whereSeparator: { $0.isWhitespace }).last.map { $0.lowercased() } ?? ""
+                capitalize = sentenceEndingAbbreviations.contains(before)
+            }
+            result.removeSubrange(range)
+            if capitalize, let first = result[range.lowerBound...].first, first.isLowercase {
+                result.replaceSubrange(range.lowerBound..<result.index(after: range.lowerBound), with: first.uppercased())
+            }
+        }
+        return result
+    }
+
     static func removeFillers(_ text: String, language: DictationLanguage = .german) -> String {
         let alternation = fillers(language).map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
         let clauseStarts = language == .english
@@ -121,6 +156,12 @@ public enum RuleCleaner {
         var result = text.replacingOccurrences(
             of: #",\s*(?i:"# + alternation + #")(?![\p{L}\p{N}-])\s*,\s*(?=(?i:"# + clauseStarts + #")\b)"#,
             with: ", ", options: .regularExpression)
+        // Between two German nouns the first comma is the list separator ("Äpfel, äh, Birnen"), so it stays.
+        if language == .german {
+            result = result.replacingOccurrences(
+                of: #"(\p{Lu}[\p{L}-]*)\s*,\s*(?i:"# + alternation + #")(?![\p{L}\p{N}-])\s*,\s*(?=\p{Lu}[\p{L}-]*(?:[\s.,!?]|$))"#,
+                with: "$1, ", options: .regularExpression)
+        }
         result = result.replacingOccurrences(
             of: #",\s*(?i:"# + alternation + #")(?![\p{L}\p{N}-])\s*,\s*"#,
             with: " ", options: .regularExpression)
@@ -131,9 +172,7 @@ public enum RuleCleaner {
         }.joined(separator: "|")
         // A filler at the start of a sentence takes its period with it ("Ähm. Also ..."); anywhere else
         // the period or question mark stays as the sentence end ("morgen äh. Dann").
-        result = result.replacingOccurrences(
-            of: #"(?:^|(?<=[.?!] ))(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,.…]*\s*"#,
-            with: "", options: .regularExpression)
+        result = removeSentenceStartFillers(result, casedAlternation: casedAlternation)
         result = result.replacingOccurrences(
             of: #"(?<![\p{L}\p{N}-])(?:"# + casedAlternation + #")(?![\p{L}\p{N}-])[,…]*"#,
             with: "", options: .regularExpression)
@@ -148,8 +187,9 @@ public enum RuleCleaner {
             // Parakeet sometimes renders "ähm" as a lone capital M inside a sentence. Keep real letters:
             // "Größe M oder L", "M wie Martha", "Variante M ist günstiger". Only after a lowercase word
             // (verb, adverb) or a comma; a capitalized word before it is almost always a noun it labels.
+            // After a preposition or an ordering verb ("in M auf Lager", "nehme M") it is a size.
             result = result.replacingOccurrences(
-                of: #"((?<![\p{L}\p{N}-])\p{Ll}[\p{L}]*|,) (?<!(?i:größe|typ|klasse|buchstabe|gruppe|variante|modell|paket|stufe|format|version|kategorie|plan|set) )Mm?(?= \p{Ll})(?! (?:wie|oder|und)\b)"#,
+                of: #"((?<![\p{L}\p{N}-])(?!(?:in|von|auf|für|bei|ab|nur|mit|ohne|zu|bis|nach|an|um|aus|statt|gegen|als|nehme|nehmen|nimm|nehmt|brauche|brauchen|hätte|hätten|nenne|wähle|wählen|bestelle|bestellen|sowie|plus)\b)\p{Ll}[\p{L}]*|,) (?<!(?i:größe|typ|klasse|buchstabe|gruppe|variante|modell|paket|stufe|format|version|kategorie|plan|set) )Mm?(?= \p{Ll})(?! (?:wie|oder|und)\b)"#,
                 with: "$1", options: .regularExpression)
         }
         result = tidyAfterRemoval(result)
@@ -179,7 +219,9 @@ public enum RuleCleaner {
                     let isGrammatical = doubles.contains(firstNorm[0]) && nounFollows
                     let isAllowedDouble = isNumber || (size == 1 && (emphasis.contains(firstNorm[0]) || isGrammatical))
                     let hasNewline = first.contains { $0.contains("\n") }
-                    if firstNorm == secondNorm, !firstNorm.contains(""), !endsClause, !isAllowedDouble, !hasNewline {
+                    // "M Ü L L E R": a spelled name or code keeps its doubled letters.
+                    let isSpelled = size == 1 && isSingleChar(firstNorm[0]) && spelledRunLength(tokens, around: i) >= 3
+                    if firstNorm == secondNorm, !isSpelled, !firstNorm.contains(""), !endsClause, !isAllowedDouble, !hasNewline {
                         tokens.removeSubrange(i..<i + size)
                         changed = true
                     } else {
@@ -189,6 +231,19 @@ public enum RuleCleaner {
             }
         }
         return tokens.joined(separator: " ")
+    }
+
+    private static func isSingleChar(_ norm: String) -> Bool {
+        norm.count == 1 && (norm.first?.isLetter == true || norm.first?.isNumber == true)
+    }
+
+    /// How many single-letter or single-digit tokens in a row contain the token at `index`.
+    private static func spelledRunLength(_ tokens: [String], around index: Int) -> Int {
+        var start = index
+        while start > 0, isSingleChar(normalizeToken(tokens[start - 1])) { start -= 1 }
+        var end = index
+        while end + 1 < tokens.count, isSingleChar(normalizeToken(tokens[end + 1])) { end += 1 }
+        return end - start + 1
     }
 
     /// Spoken punctuation, quotes and brackets.
@@ -455,7 +510,7 @@ public enum RuleCleaner {
         var result = text
         guard let last = result.last else { return result }
         let beforeClosers = result.reversed().first { !"“”»)\"'".contains($0) }
-        if last.isLetter || last.isNumber {
+        if last.isLetter || last.isNumber || "%€$£".contains(last) {
             result.append(".")
         } else if "“”»)".contains(last), let beforeClosers, beforeClosers.isLetter || beforeClosers.isNumber {
             result.append(".")

@@ -63,32 +63,15 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
     }
 
     public func cleanup(text: String, style: Style, language: DictationLanguage = .german) async throws -> String {
-        let output = try await chat(
-            system: Prompts.cleanupSystem(language),
-            user: Prompts.cleanupUser(text: text, language: language),
-            maxTokens: text.count / 2 + 64,
-            timeout: configuration.cleanupTimeout
-        )
-        guard let accepted = LLMOutputGuard.acceptCleanup(input: text, output: output, style: style) else {
-            throw LLMError.rejectedOutput
+        try await LLMRequests.cleanup(text: text, style: style, language: language) { system, user, maxTokens in
+            try await chat(system: system, user: user, maxTokens: maxTokens, timeout: configuration.cleanupTimeout)
         }
-        return accepted
     }
 
     public func rewrite(selection: String, instruction: String) async throws -> String {
-        let language = DictationLanguage.detect(selection) ?? DictationLanguage.detect(instruction) ?? .german
-        let output = try await chat(
-            system: Prompts.rewriteSystem(language),
-            user: Prompts.rewriteUser(selection: selection, instruction: instruction, language: language),
-            model: configuration.rewriteModel,
-            maxTokens: max(512, selection.count),
-            timeout: configuration.rewriteTimeout
-        )
-        guard !LLMOutputGuard.sanitize(output).isEmpty else { throw LLMError.badResponse }
-        guard let accepted = LLMOutputGuard.acceptRewrite(selection: selection, instruction: instruction, output: output) else {
-            throw LLMError.rejectedOutput
+        try await LLMRequests.rewrite(selection: selection, instruction: instruction) { system, user, maxTokens in
+            try await chat(system: system, user: user, model: configuration.rewriteModel, maxTokens: maxTokens, timeout: configuration.rewriteTimeout)
         }
-        return accepted
     }
 
     // MARK: - Status
@@ -108,6 +91,12 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
     // MARK: - HTTP
 
     func chat(system: String, user: String, model: String? = nil, maxTokens: Int, timeout: TimeInterval) async throws -> String {
+        // Ollama silently cuts the start of a prompt that exceeds its context (and with it the
+        // instructions), and the answer would replace the whole selection. So the context is sized to
+        // the request, and a request that does not fit is refused like the built-in engine does.
+        guard let numCtx = Self.contextSize(promptCharacters: system.count + user.count, maxTokens: maxTokens) else {
+            throw LLMError.tooLong
+        }
         let body: [String: Any] = [
             "model": model ?? configuration.model,
             "stream": false,
@@ -116,14 +105,36 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
                 ["role": "system", "content": system],
                 ["role": "user", "content": user],
             ],
-            "options": ["temperature": 0.1, "num_predict": maxTokens],
+            "options": ["temperature": 0.1, "num_predict": maxTokens, "num_ctx": numCtx],
         ]
         let data = try await post(path: "api/chat", body: body, timeout: timeout)
+        return try Self.parseChatResponse(data, contextSize: numCtx)
+    }
+
+    /// The answer text of an /api/chat reply. An answer cut off by the token limit (done_reason "length")
+    /// is rejected: a rewrite would otherwise replace the whole selection with a truncated text.
+    static func parseChatResponse(_ data: Data, contextSize: Int? = nil) throws -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let message = json["message"] as? [String: Any],
               let content = message["content"] as? String
         else { throw LLMError.badResponse }
+        if json["done_reason"] as? String == "length" { throw LLMError.rejectedOutput }
+        // A prompt that filled the whole context was cut at the start.
+        if let contextSize, let evaluated = json["prompt_eval_count"] as? Int, evaluated >= contextSize - 64 {
+            throw LLMError.tooLong
+        }
         return content
+    }
+
+    /// Context sizes Ollama is asked for: a few fixed steps, because every other value reloads the model.
+    static let contextSizes = [4096, 8192, 16384, 32768]
+
+    /// The smallest context that holds the prompt and the answer (estimated at two characters per
+    /// token, the answer at most as long as the prompt), nil when none does.
+    static func contextSize(promptCharacters: Int, maxTokens: Int) -> Int? {
+        let prompt = promptCharacters / 2 + 64
+        let needed = prompt + min(maxTokens, prompt)
+        return contextSizes.first { $0 >= needed }
     }
 
     private func post(path: String, body: [String: Any], timeout: TimeInterval) async throws -> Data {
@@ -200,7 +211,7 @@ public enum OllamaEndpoint {
 }
 
 /// Runs `operation` and throws `LLMError.timeout` if it does not finish within `seconds`.
-func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+public func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await operation() }
         group.addTask {

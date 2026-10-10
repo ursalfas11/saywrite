@@ -25,6 +25,14 @@ jobs:
         run: swift test
       - name: Build the app
         run: make app DEVELOPER_DIR="$(xcode-select -p)"
+      - name: Check the embedded llama.framework (signature, rpath, dyld link)
+        run: |
+          codesign --verify --deep --strict build/Saywrite.app
+          otool -l build/Saywrite.app/Contents/MacOS/Saywrite | grep -A2 LC_RPATH | grep "@executable_path/../Frameworks"
+          otool -L build/Saywrite.app/Contents/MacOS/Saywrite | grep llama.framework
+          build/Saywrite.app/Contents/MacOS/Saywrite --render-overlay "$RUNNER_TEMP/overlay"
+      - name: Rules-only eval (fails below Tests/Eval/rules-baseline.txt)
+        run: scripts/eval-rules.sh
       - name: Pack the app
         run: |
           ditto -c -k --keepParent build/Saywrite.app "build/Saywrite-$GITHUB_REF_NAME.zip"

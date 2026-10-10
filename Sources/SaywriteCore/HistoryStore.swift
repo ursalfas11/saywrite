@@ -16,6 +16,20 @@ public final class HistoryStore: @unchecked Sendable {
         } else {
             cache = []
         }
+        // Earlier versions stored a rewrite as "[instruction] selected text": drop those once.
+        let kept = cache.filter { !Self.isRewriteEntry($0) }
+        if kept.count != cache.count {
+            cache = kept
+            save(kept)
+        }
+    }
+
+    /// An entry written for a rewrite by an earlier version: "[instruction]" plus the selected text.
+    /// Rewrites are no longer stored at all, the selection and its result are the user's own document.
+    static func isRewriteEntry(_ result: DictationResult) -> Bool {
+        // Rewrites were stored with latency 0; a dictation always has a measured latency, so "[Applause] thanks"
+        // from a recognizer stays.
+        result.latency == 0 && result.raw.hasPrefix("[") && result.raw.contains("] ")
     }
 
     public static func defaultFileURL() -> URL {
@@ -49,12 +63,6 @@ public final class HistoryStore: @unchecked Sendable {
         if changed { save(kept) }
     }
 
-    /// The text stored for a rewrite: only the instruction. The selected text is the user's own
-    /// document, not something Saywrite produced, and is never written to disk.
-    public static func rewriteRaw(instruction: String) -> String {
-        "[\(instruction)]"
-    }
-
     public func clear() {
         lock.lock()
         cache.removeAll()
@@ -64,11 +72,17 @@ public final class HistoryStore: @unchecked Sendable {
 
     private func save(_ items: [DictationResult]) {
         do {
-            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // Dictations can be private: readable by this user only, from the first byte on.
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let data = try JSONEncoder.history.encode(items)
-            try data.write(to: fileURL, options: .atomic)
-            // Dictations can be private: readable by this user only.
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            let temp = fileURL.appendingPathExtension("tmp")
+            try? FileManager.default.removeItem(at: temp)
+            guard FileManager.default.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+                return
+            }
+            // rename(2) replaces the old file atomically and keeps the mode of the temporary one.
+            if rename(temp.path, fileURL.path) != 0 { try? FileManager.default.removeItem(at: temp) }
         } catch {
             // History is a convenience; failing to save must never break dictation.
         }

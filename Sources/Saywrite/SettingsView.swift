@@ -61,14 +61,29 @@ private struct SetupTab: View {
                           actionTitle: modelFailed ? L("Try again", "Erneut versuchen") : nil) {
                     controller.retryModelLoad()
                 }
-                StatusRow(ok: state.ollamaState == .ready, title: L("AI (Ollama)", "KI (Ollama)"), detail: ollamaDetail,
-                          actionTitle: L("Check", "Prüfen"), alwaysShowAction: true) {
-                    Task { await controller.refreshOllamaStatus() }
+                if settings.llmBackend == .builtin {
+                    BuiltinModelRow(state: state, controller: controller)
+                } else {
+                    StatusRow(ok: state.ollamaState == .ready, title: L("AI (Ollama)", "KI (Ollama)"), detail: ollamaDetail,
+                              actionTitle: L("Check", "Prüfen"), alwaysShowAction: true) {
+                        Task { await controller.refreshOllamaStatus() }
+                    }
                 }
             } header: {
                 Text("Status")
             } footer: {
-                if state.ollamaState == .unreachable || state.ollamaState == .modelMissing {
+                if settings.llmBackend == .builtin {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if state.builtinState != .ready {
+                            Text(L("Saywrite works without the AI model too – just without AI cleanup.", "Ohne das KI-Modell funktioniert Saywrite trotzdem – nur ohne KI-Aufräumen."))
+                        }
+                        Text(L("Model: \(ModelSpec.qwen25_3b.displayName), \(String(format: "%.1f", Double(ModelSpec.qwen25_3b.size) / 1e9)) GB, runs on this Mac. Licence: non-commercial use only.",
+                               "Modell: \(ModelSpec.qwen25_3b.displayName), \(String(format: "%.1f", Double(ModelSpec.qwen25_3b.size) / 1e9)) GB, läuft auf diesem Mac. Lizenz: nur nicht-kommerzielle Nutzung."))
+                        Link(ModelSpec.qwen25_3b.licenseName, destination: ModelSpec.qwen25_3b.licenseURL)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else if state.ollamaState == .unreachable || state.ollamaState == .modelMissing {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L("Saywrite works without Ollama too – just without AI cleanup.", "Ohne Ollama funktioniert Saywrite trotzdem – nur ohne KI-Aufräumen."))
                         Text("brew install ollama && brew services start ollama\nollama pull \(settings.ollamaModel)")
@@ -110,6 +125,60 @@ private struct SetupTab: View {
         case .unreachable: return L("Not reachable", "Nicht erreichbar")
         case .modelMissing: return L("Model \(settings.ollamaModel) is missing", "Modell \(settings.ollamaModel) fehlt")
         case .ready: return L("Ready (\(settings.ollamaModel))", "Bereit (\(settings.ollamaModel))")
+        }
+    }
+}
+
+/// The row for the built-in model: size and licence are shown (in the footer) before the first
+/// download, which only starts with a click, and the progress is shown like the speech model's.
+private struct BuiltinModelRow: View {
+    @ObservedObject var state: AppState
+    let controller: DictationController
+
+    private var sizeText: String { String(format: "%.1f GB", Double(ModelSpec.qwen25_3b.size) / 1e9) }
+
+    var body: some View {
+        HStack {
+            Image(systemName: state.builtinState == .ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(state.builtinState == .ready ? .green : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L("AI (built-in)", "KI (eingebaut)"))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+                if case .downloading(let fraction) = state.builtinState {
+                    ProgressView(value: fraction).frame(maxWidth: 220)
+                }
+            }
+            Spacer()
+            switch state.builtinState {
+            case .notDownloaded:
+                Button(L("Download (\(sizeText))", "Laden (\(sizeText))")) { controller.downloadBuiltinModel() }
+            case .partial:
+                Button(L("Resume", "Fortsetzen")) { controller.downloadBuiltinModel() }
+                Button(L("Delete", "Löschen")) { controller.deleteBuiltinModel() }
+            case .downloading:
+                Button(L("Pause", "Pause")) { controller.pauseBuiltinDownload() }
+            case .verifying, .optimizing:
+                ProgressView().controlSize(.small)
+            case .ready:
+                Button(L("Delete model", "Modell löschen")) { controller.deleteBuiltinModel() }
+            case .failed:
+                Button(L("Try again", "Erneut versuchen")) { controller.downloadBuiltinModel() }
+                Button(L("Delete", "Löschen")) { controller.deleteBuiltinModel() }
+            }
+        }
+    }
+
+    private var detail: String {
+        switch state.builtinState {
+        case .notDownloaded: return L("Not downloaded yet", "Noch nicht geladen")
+        case .partial(let bytes):
+            let percent = Int(Double(bytes) / Double(ModelSpec.qwen25_3b.size) * 100)
+            return L("Paused at \(percent)%", "Pausiert bei \(percent) %")
+        case .downloading(let fraction): return L("Downloading… \(Int(fraction * 100))%", "Wird geladen … \(Int(fraction * 100)) %")
+        case .verifying: return L("Verifying…", "Wird geprüft …")
+        case .optimizing: return L("Optimizing for your Mac…", "Wird an deinen Mac angepasst …")
+        case .ready: return L("Ready (\(ModelSpec.qwen25_3b.displayName))", "Bereit (\(ModelSpec.qwen25_3b.displayName))")
+        case .failed(let message): return L("Error: \(message)", "Fehler: \(message)")
         }
     }
 }
@@ -199,11 +268,17 @@ private struct GeneralTab: View {
                     ForEach(languages, id: \.0) { Text($0.1).tag($0.0) }
                 }
                 Toggle(L("AI cleanup (only when needed)", "KI-Aufräumen (nur wenn nötig)"), isOn: $settings.aiEnabled)
-                ModelField(title: L("Model (cleanup)", "Modell (Aufräumen)"), value: $settings.ollamaModel, models: state.installedModels)
-                ModelField(title: L("Model (rewrite)", "Modell (Umformulieren)"), value: $settings.rewriteModel, models: state.installedModels, allowSame: true)
-                TextField(L("Ollama address", "Ollama-Adresse"), text: $settings.ollamaURL)
-                if let warning = remoteOllamaWarning {
-                    Text(warning).font(.caption).foregroundStyle(.orange)
+                Picker(L("AI engine", "KI-Engine"), selection: $settings.llmBackend) {
+                    Text(L("Built-in model", "Eingebautes Modell")).tag(LLMBackend.builtin)
+                    Text("Ollama").tag(LLMBackend.ollama)
+                }
+                if settings.llmBackend == .ollama {
+                    ModelField(title: L("Model (cleanup)", "Modell (Aufräumen)"), value: $settings.ollamaModel, models: state.installedModels)
+                    ModelField(title: L("Model (rewrite)", "Modell (Umformulieren)"), value: $settings.rewriteModel, models: state.installedModels, allowSame: true)
+                    TextField(L("Ollama address", "Ollama-Adresse"), text: $settings.ollamaURL)
+                    if let warning = remoteOllamaWarning {
+                        Text(warning).font(.caption).foregroundStyle(.orange)
+                    }
                 }
                 Stepper(L("AI time limit: \(Int(settings.llmTimeout)) s", "KI-Zeitlimit: \(Int(settings.llmTimeout)) s"), value: $settings.llmTimeout, in: 3...30)
             }
@@ -242,6 +317,7 @@ private struct GeneralTab: View {
         .onChange(of: settings.rewriteKey) { _, _ in controller.applySettings() }
         .onChange(of: settings.language) { _, _ in controller.applySettings() }
         .onChange(of: settings.ollamaModel) { _, _ in Task { await controller.refreshOllamaStatus() } }
+        .onChange(of: settings.llmBackend) { _, _ in controller.backendChanged() }
     }
 }
 
@@ -320,8 +396,8 @@ private struct HistoryTab: View {
         VStack(alignment: .leading) {
             Toggle(L("Keep recent dictations on this Mac", "Letzte Diktate auf diesem Mac behalten"), isOn: $settings.keepHistory)
                 .onChange(of: settings.keepHistory) { _, keep in if !keep { controller.clearHistory() } }
-            Text(L("Stored unencrypted for 30 days at most, readable by your user only. A rewrite keeps only your spoken instruction, never the selected text.",
-                   "Unverschlüsselt gespeichert, höchstens 30 Tage, nur für deinen Benutzer lesbar. Bei einer Umformulierung bleibt nur die gesprochene Anweisung, nie der markierte Text."))
+            Text(L("Stored unencrypted for 30 days at most, readable by your user only. Rewrites are not stored.",
+                   "Unverschlüsselt gespeichert, höchstens 30 Tage, nur für deinen Benutzer lesbar. Umformulierungen werden nicht gespeichert."))
                 .font(.caption).foregroundStyle(.secondary)
             if state.history.isEmpty {
                 Spacer()

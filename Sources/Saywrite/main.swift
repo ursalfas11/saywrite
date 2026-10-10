@@ -1,10 +1,12 @@
 import AppKit
+import SaywriteLlama
 
 let arguments = CommandLine.arguments
 if let index = arguments.firstIndex(of: "--selftest") {
     let testArguments = Array(arguments[(index + 1)...])
     Task {
         let code = await SelfTest.run(arguments: testArguments)
+        LlamaEngine.shared.shutdown() // ggml asserts at exit when the Metal model is still loaded
         exit(code)
     }
     dispatchMain()
