@@ -2,22 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
+	<key>CFBundleName</key>
+	<string>Saywrite</string>
 	<key>CFBundleDisplayName</key>
 	<string>Saywrite</string>
-	<key>CFBundleExecutable</key>
-	<string>Saywrite</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.saywrite.app</string>
-	<key>CFBundleLocalizations</key>
-	<array>
-		<string>en</string>
-		<string>de</string>
-	</array>
-	<key>CFBundleName</key>
+	<key>CFBundleExecutable</key>
 	<string>Saywrite</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -25,15 +16,24 @@
 	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
 	<string>2</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>de</string>
+	</array>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-	<key>NSHumanReadableCopyright</key>
-	<string>MIT License</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Saywrite records your voice to turn it into text, locally on your Mac.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT License</string>
 </dict>
 </plist>
