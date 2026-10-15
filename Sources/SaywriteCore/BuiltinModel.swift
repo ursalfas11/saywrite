@@ -135,6 +135,23 @@ public struct PrefixSnapshots<State> {
     }
 }
 
+/// After an app or macOS update llama.cpp compiles its Metal kernels again on the first load (5–7 s),
+/// and the first dictation would run into the cleanup timeout. The app loads the model once in the
+/// background at launch instead, and remembers for which build it did.
+public enum UpdatePrewarm {
+    public static let defaultsKey = "builtinPrewarmedBuild"
+
+    /// The app version and the macOS version: either one changing invalidates the compiled kernels.
+    public static func build(appVersion: String?, systemVersion: String) -> String? {
+        appVersion.map { "\($0) / \(systemVersion)" }
+    }
+
+    public static func isNeeded(enabled: Bool, modelInstalled: Bool, build: String?, prewarmedBuild: String?) -> Bool {
+        guard enabled, modelInstalled, let build else { return false }
+        return build != prewarmedBuild
+    }
+}
+
 /// Settings of the built-in engine that depend on the Mac.
 public enum EngineTuning {
     /// Seconds llama.cpp keeps the model's GPU memory resident after the last request, or nil for its

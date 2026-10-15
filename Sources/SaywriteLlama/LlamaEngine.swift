@@ -176,15 +176,36 @@ public actor LlamaEngine {
 
     /// Starts loading in the background, or returns the load that is already running, so a burst of
     /// requests while the model loads shares one load.
-    public nonisolated func startLoading(modelURL: URL, language: DictationLanguage, forRewrite: Bool) -> Task<Void, Never> {
+    public nonisolated func startLoading(
+        modelURL: URL, language: DictationLanguage, forRewrite: Bool, priority: TaskPriority? = nil
+    ) -> Task<Void, Never> {
         pending.lock.lock(); defer { pending.lock.unlock() }
         if let task = pending.task { return task }
-        let task = Task.detached { [self] in
+        let task = Task.detached(priority: priority) { [self] in
             await prewarm(modelURL: modelURL, language: language, forRewrite: forRewrite)
             pending.clear()
         }
         pending.task = task
         return task
+    }
+
+    /// At launch: loads the model in the background when this app and macOS build have not loaded it yet
+    /// (`UpdatePrewarm`), so the Metal kernels are compiled before the first dictation. A dictation that
+    /// starts meanwhile shares the load. `enabled`: the AI is on and the built-in model is the backend.
+    public nonisolated func prewarmAfterUpdate(modelURL: URL, language: DictationLanguage, enabled: Bool) {
+        let build = UpdatePrewarm.build(
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+            systemVersion: ProcessInfo.processInfo.operatingSystemVersionString)
+        guard UpdatePrewarm.isNeeded(
+            enabled: enabled, modelInstalled: FileManager.default.fileExists(atPath: modelURL.path),
+            build: build, prewarmedBuild: UserDefaults.standard.string(forKey: UpdatePrewarm.defaultsKey)),
+            let build
+        else { return }
+        let load = startLoading(modelURL: modelURL, language: language, forRewrite: false, priority: .utility)
+        Task.detached(priority: .utility) { [self] in
+            await load.value
+            if isLoaded { UserDefaults.standard.set(build, forKey: UpdatePrewarm.defaultsKey) }
+        }
     }
 
     /// Frees the model before the process exits, blocking the caller for at most `timeout` seconds.

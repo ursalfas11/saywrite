@@ -101,6 +101,28 @@ final class EngineSpeedupTests: XCTestCase {
         XCTAssertEqual(snapshots.count, 0)
     }
 
+    // MARK: Prewarm after an update
+
+    func testPrewarmsOncePerAppAndSystemBuild() {
+        let build = UpdatePrewarm.build(appVersion: "12", systemVersion: "Version 15.5")
+        XCTAssertEqual(build, "12 / Version 15.5")
+        XCTAssertTrue(UpdatePrewarm.isNeeded(enabled: true, modelInstalled: true, build: build, prewarmedBuild: nil))
+        XCTAssertTrue(UpdatePrewarm.isNeeded(enabled: true, modelInstalled: true, build: build, prewarmedBuild: "11 / Version 15.5"))
+        // A macOS update also throws the compiled kernels away.
+        XCTAssertTrue(UpdatePrewarm.isNeeded(enabled: true, modelInstalled: true, build: build, prewarmedBuild: "12 / Version 15.4"))
+        XCTAssertFalse(UpdatePrewarm.isNeeded(enabled: true, modelInstalled: true, build: build, prewarmedBuild: build))
+    }
+
+    func testNoPrewarmWithoutTheBuiltinModel() {
+        let build = UpdatePrewarm.build(appVersion: "12", systemVersion: "Version 15.5")
+        // Ollama as the backend or the AI switched off.
+        XCTAssertFalse(UpdatePrewarm.isNeeded(enabled: false, modelInstalled: true, build: build, prewarmedBuild: nil))
+        XCTAssertFalse(UpdatePrewarm.isNeeded(enabled: true, modelInstalled: false, build: build, prewarmedBuild: nil))
+        // No version (the command line tools): nothing to remember it by.
+        XCTAssertNil(UpdatePrewarm.build(appVersion: nil, systemVersion: "Version 15.5"))
+        XCTAssertFalse(UpdatePrewarm.isNeeded(enabled: true, modelInstalled: true, build: nil, prewarmedBuild: nil))
+    }
+
     // MARK: Engine settings
 
     func testShortResidencyOnlyOnSmallMacs() {
