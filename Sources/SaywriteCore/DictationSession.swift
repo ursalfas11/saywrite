@@ -232,10 +232,15 @@ public actor DictationSession {
         var units: [String] = []
         for segment in spoken {
             var segmentUnits = segment.units
-            if segment.continuesPrevious, !units.isEmpty, let first = segmentUnits.first, CleanupGate.correctsPrevious(first, previous: units.last, language: language) {
-                // "am Donnerstag, | nein, am Freitag": keep apart so the correction pass below sees it.
-                units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1])
-            } else if segment.continuesPrevious, !units.isEmpty, !segmentUnits.isEmpty {
+            // A cut without a pause, or a pause the recognizer took for a sentence end (not when the
+            // segment starts with a spoken line break).
+            let continues = segment.continuesPrevious
+                || (Self.startsMidSentence(segment.raw, after: units.last) && segmentUnits.first?.hasPrefix("\n") == false)
+            if continues, !units.isEmpty, let first = segmentUnits.first, CleanupGate.correctsPrevious(first, previous: units.last, language: language) {
+                // "am Donnerstag, | nein, am Freitag": keep apart so the correction pass below sees it. After a
+                // pause the period stays, so the text reads right if the model is off or fails.
+                if segment.continuesPrevious { units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1]) }
+            } else if continues, !units.isEmpty, !segmentUnits.isEmpty {
                 // Cut mid-sentence: glue the halves back together.
                 units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1])
                 segmentUnits[0] = Self.lowercaseContinuation(segmentUnits[0])
@@ -358,6 +363,19 @@ public actor DictationSession {
     static func splitLeadingBreak(_ text: String) -> (lead: String, body: String) {
         let lead = String(text.prefix { $0 == "\n" })
         return (lead, String(text.dropFirst(lead.count)))
+    }
+
+    /// The recognizer starts every segment with a capital; one that starts lowercase after a pause
+    /// continues the sentence before it ("Bitte prüfe den Bericht." | "und schicke ihn weiter."). Only
+    /// after a plain period: "?", "!" and "..." end a sentence on purpose, and the period of "usw." stays.
+    /// "iPhone" or "github.com" start lowercase anyway.
+    static func startsMidSentence(_ raw: String, after previous: String?) -> Bool {
+        guard let previous, previous.hasSuffix("."), !previous.hasSuffix(".."),
+              let last = previous.split(whereSeparator: { $0.isWhitespace }).last,
+              !RuleCleaner.abbreviations.contains(last.lowercased()),
+              let first = raw.split(whereSeparator: { $0.isWhitespace }).first,
+              first.first?.isLowercase == true, !RuleCleaner.isBrandToken(first) else { return false }
+        return true
     }
 
     static func dropFalsePeriod(_ text: String) -> String {
