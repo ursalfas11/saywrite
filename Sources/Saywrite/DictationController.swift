@@ -73,6 +73,14 @@ final class DictationController {
     private var lastVoice = Date()
     /// Last inserted dictation that has a rules-only alternative, for the "Original" button.
     private var undoCandidate: DictationResult?
+    /// Keys the user pressed since the last paste: after typing, ⌘Z would undo the typing.
+    private var keysSinceInsert = 0
+    /// The session that stopped by itself (silence or maximum length): its text is not inserted.
+    private var autoStoppedSession: UUID?
+    /// The text of the last automatically stopped dictation, for the "Insert" button of its pill.
+    private var pendingAutoStop: PendingInsert?
+    /// Opens the settings window (set by the app delegate), for errors whose fix is there.
+    var openSettings: (() -> Void)?
 
     /// Hands-free recordings stop by themselves after this much silence, or at the latest here.
     private let silenceStop: TimeInterval = 60
@@ -90,8 +98,11 @@ final class DictationController {
         state.history = history.items
 
         hotkeys.onEvent = { [weak self] event in self?.handle(event) }
+        hotkeys.onKeyDown = { [weak self] event in self?.userPressedKey(event) }
         overlay.onStop = { [weak self] in self?.stopFromOverlay() }
         overlay.onUndo = { [weak self] in self?.insertOriginal() }
+        overlay.onCancel = { [weak self] in self?.cancelFromOverlay() }
+        overlay.onInsertPending = { [weak self] in self?.insertPendingAutoStop() }
         audio.onDeviceLost = { [weak self] in
             guard let self, case .recording(let action) = self.phase else { return }
             self.hotkeys.reset()
@@ -234,7 +245,7 @@ final class DictationController {
                 guard isCurrent() else { return }
                 // An interrupted connection leaves the partial file: say so, the button continues it.
                 if (error as? ModelDownloadError) == .incomplete {
-                    state.builtinState = .failed(L("Download interrupted – continue to resume", "Download unterbrochen – Fortsetzen macht weiter"))
+                    state.builtinState = .failed(L("Download interrupted – Resume continues it", "Download unterbrochen – Fortsetzen macht weiter"))
                 } else {
                     state.builtinState = .failed(error.localizedDescription)
                 }
@@ -323,14 +334,16 @@ final class DictationController {
         case .begin(let action):
             begin(action, handsFree: false)
         case .handsFree(let action):
-            if case .recording(let current) = phase, current == action {
+            if case .recording(let current) = phase, current == action, !rewriteBlocked(action) {
                 showRecordingOverlay(action, handsFree: true)
                 prepare(action)
+                watchSelection(action)
             }
         case .confirmed(let action):
-            if case .recording(let current) = phase, current == action {
+            if case .recording(let current) = phase, current == action, !rewriteBlocked(action) {
                 showRecordingOverlay(action, handsFree: false)
                 prepare(action)
+                watchSelection(action)
             }
         case .end(let action):
             requestFinish(action)
@@ -348,6 +361,41 @@ final class DictationController {
             var configuration = settings.ollamaConfiguration
             configuration.prewarmLanguage = prewarmLanguage
             return OllamaClient(configuration: configuration)
+        }
+    }
+
+    /// A rewrite that cannot run is stopped as soon as it is clearly a rewrite, before the user speaks
+    /// the instruction. Not earlier: right ⌘ alone is also every right-⌘ shortcut.
+    private func rewriteBlocked(_ action: HotkeyAction) -> Bool {
+        guard action == .rewrite, let blocker = RewriteBlocker.check(
+            aiEnabled: settings.aiEnabled, builtinBackend: settings.llmBackend == .builtin,
+            modelInstalled: modelStore.isInstalled(modelSpec), withholdAI: sessionWithholdAI) else { return false }
+        hotkeys.reset()
+        cancel()
+        let settingsAction: () -> Void = { [weak self] in self?.openSettings?() }
+        switch blocker {
+        case .aiOff:
+            showError(L("Rewriting needs the AI – it is off in settings", "Umformulieren braucht die KI – sie ist in den Einstellungen aus"),
+                      action: settingsAction, actionTitle: L("Settings", "Einstellungen"))
+        case .modelMissing:
+            showError(L("Rewriting needs the AI model – download it in settings", "Umformulieren braucht das KI-Modell – in den Einstellungen laden"),
+                      action: settingsAction, actionTitle: L("Settings", "Einstellungen"))
+        case .secureInput:
+            showError(L("Secure input active – AI off", "Gesicherte Eingabe aktiv – KI aus"), action: nil)
+        }
+        return true
+    }
+
+    /// Without a selection there is nothing to rewrite: say so while the user is still about to speak.
+    private func watchSelection(_ action: HotkeyAction) {
+        guard action == .rewrite, let task = selectionTask else { return }
+        let id = sessionID
+        Task { [weak self] in
+            let selection = await task.value
+            guard selection == nil, let self, self.sessionID == id, case .recording = self.phase else { return }
+            self.hotkeys.reset()
+            self.cancel()
+            self.showError(L("No text selected – select text, then try again", "Kein Text markiert – erst Text markieren"), action: nil)
         }
     }
 
@@ -392,9 +440,36 @@ final class DictationController {
             if case .loading(let progress) = state.modelState {
                 showError(L("Speech model is loading (\(Int(progress * 100))%) – almost ready", "Sprachmodell wird geladen (\(Int(progress * 100)) %) – gleich geht's los"), action: nil)
             } else {
-                showError(L("Speech model not available", "Sprachmodell nicht verfügbar"), action: nil)
+                // A failed load (no network on first launch, a full disk) is retried on the press
+                // instead of failing the same way until the app restarts.
+                retryModelLoad()
+                showError(L("Speech model not available – loading again", "Sprachmodell nicht verfügbar – wird neu geladen"),
+                          action: { [weak self] in self?.openSettings?() }, actionTitle: L("Settings", "Einstellungen"))
             }
             hotkeys.reset()
+            return
+        }
+        // Known before anything starts: a denied microphone would only fail in audio.start().
+        switch Permissions.microphoneStatus {
+        case .granted:
+            break
+        case .denied:
+            showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings,
+                      actionTitle: L("Open settings", "Einstellungen öffnen"))
+            hotkeys.reset()
+            return
+        case .undetermined:
+            hotkeys.reset()
+            Task {
+                let granted = await Permissions.requestMicrophone()
+                state.microphoneGranted = granted
+                if granted {
+                    overlay.show(.notice(L("Microphone allowed – tap again to dictate", "Mikrofon erlaubt – nochmal tippen zum Diktieren"), symbol: "mic.badge.plus"))
+                } else {
+                    showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings,
+                              actionTitle: L("Open settings", "Einstellungen öffnen"))
+                }
+            }
             return
         }
 
@@ -437,7 +512,8 @@ final class DictationController {
             teardown()
             hotkeys.reset()
             if Permissions.microphoneStatus != .granted {
-                showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings)
+                showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings,
+                          actionTitle: L("Open settings", "Einstellungen öffnen"))
             } else {
                 showError(L("Microphone could not start", "Mikrofon konnte nicht starten"), action: nil)
             }
@@ -483,14 +559,28 @@ final class DictationController {
                 guard !Task.isCancelled, let self, self.sessionID == id, case .recording(let action) = self.phase else { return }
 
                 let now = Date()
-                if now.timeIntervalSince(self.lastVoice) > self.silenceStop || now.timeIntervalSince(self.recordingStart) > self.maximumRecording {
+                let elapsed = now.timeIntervalSince(self.recordingStart)
+                let silent = now.timeIntervalSince(self.lastVoice)
+                self.overlay.model.elapsed = elapsed
+                self.overlay.model.countdown = RecordingClock.countdown(
+                    elapsed: elapsed, silent: silent, maximum: self.maximumRecording, silenceLimit: self.silenceStop)
+                if silent > self.silenceStop || elapsed > self.maximumRecording {
+                    // Nobody may be at the Mac any more: the text is kept, not pasted wherever the focus is now.
                     Debug.log("auto stop: silence or maximum length")
+                    self.autoStoppedSession = id
                     self.hotkeys.reset()
                     self.requestFinish(action)
                     return
                 }
             }
         }
+    }
+
+    /// The × of the recording pill: discard, like Esc.
+    private func cancelFromOverlay() {
+        guard case .recording = phase else { return }
+        hotkeys.reset()
+        cancel()
     }
 
     private func stopFromOverlay() {
@@ -568,6 +658,9 @@ final class DictationController {
             overlay.show(.hidden)
             return
         }
+        let autoStopped = autoStoppedSession == id
+        // Probe the paste target and save the clipboard while the text is still being prepared.
+        let preparation = autoStopped ? nil : Task { await TextInserter.prepare() }
         if let rest = await segmenter.flush() {
             await session.addSegment(rest)
         }
@@ -576,17 +669,30 @@ final class DictationController {
                 showError(L("No sound from the microphone – check the input device", "Kein Ton vom Mikrofon – Eingabegerät prüfen"),
                           action: Permissions.openMicrophoneSettings)
             } else {
-                overlay.show(.done(L("Nothing heard", "Nichts gehört"), undo: false))
+                overlay.show(.notice(L("Nothing heard – try again", "Nichts gehört – nochmal versuchen"), symbol: "ear"))
             }
+            return
+        }
+        if autoStopped {
+            // Nobody may be at the Mac any more and the focus may be anywhere: keep the text instead of
+            // pasting it, in the history and behind the "Insert" button of the pill.
+            appendToHistory(result)
+            pendingAutoStop = PendingInsert(text: result.final, selection: nil)
+            undoCandidate = nil
+            if settings.playSounds { sounds.playStop() }
+            overlay.show(.autoStopped(L("Stopped automatically", "Automatisch beendet")))
+            readyForNext(id)
             return
         }
         overlay.model.committedText = result.final
         overlay.model.partialText = ""
         let hasOriginal = result.withoutAI != nil
         if hasOriginal { undoCandidate = result }
-        let outcome = await TextInserter.insert(result.final, expectedApp: sessionApp, onPasted: { [weak self] in
+        let prepared = await preparation?.value
+        let outcome = await TextInserter.insert(result.final, expectedApp: sessionApp, prepared: prepared, onPasted: { [weak self] in
             // Sound and panel react the moment the text lands, not after the clipboard restore.
             guard let self else { return }
+            self.keysSinceInsert = 0
             if self.settings.playSounds { self.sounds.playStop() }
             let undo = hasOriginal && TextInserter.lastPasteSupportsUndo
             if !undo { self.undoCandidate = nil }
@@ -595,19 +701,17 @@ final class DictationController {
         })
         // A password field, or a possible one (secure input, focus unknown), never goes to the history file.
         if outcome != .secureField && outcome != .copiedSecureInput { appendToHistory(result) }
+        if outcome != .pasted { undoCandidate = nil }
         switch outcome {
         case .pasted:
             break
         case .copiedToClipboard:
-            overlay.show(.done(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), undo: false))
+            overlay.show(Self.copiedNotice)
         case .appChanged:
-            undoCandidate = nil
-            overlay.show(.done(Self.appChangedMessage, undo: false))
+            overlay.show(Self.appChangedNotice)
         case .copiedSecureInput:
-            undoCandidate = nil
-            overlay.show(.done(Self.secureInputMessage, undo: false))
+            overlay.show(Self.secureInputNotice)
         case .secureField:
-            undoCandidate = nil
             showError(L("Password field – not inserted and not saved", "Passwortfeld – nicht eingefügt und nicht gespeichert"), action: nil)
         }
     }
@@ -619,23 +723,72 @@ final class DictationController {
         state.history = history.items
     }
 
+    /// Every key the user types (from the hotkey monitor's event tap; must stay cheap).
+    private func userPressedKey(_ event: NSEvent) {
+        keysSinceInsert += 1
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "v" || event.keyCode == 9 {
+            TextInserter.userPressedPaste()
+        }
+    }
+
     /// Replace the text just inserted with the version without AI.
     private func insertOriginal() {
         guard let result = undoCandidate, let original = result.withoutAI else { return }
         undoCandidate = nil
         overlay.model.committedText = original
-        // ⌘Z only makes sense in the app that received the text; otherwise just offer the original.
-        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == result.appBundleID else {
-            TextInserter.copy(original)
-            overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
+        // ⌘Z only hits the inserted text in the app that received it, and only while nothing was typed since.
+        let swap = OriginalSwap.decide(
+            frontmostApp: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            insertedInto: result.appBundleID, keysSinceInsert: keysSinceInsert)
+        guard swap == .undoAndPaste else {
+            TextInserter.copyTemporarily(original)
+            overlay.show(Self.originalCopiedNotice)
             return
         }
         TextInserter.undo()
         Task {
             try? await Task.sleep(nanoseconds: 120_000_000)
             switch await TextInserter.insert(original, expectedApp: result.appBundleID, recordsUndo: false) {
-            case .pasted: overlay.show(.done(L("Original inserted", "Original eingefügt"), undo: false))
-            case .copiedToClipboard, .appChanged, .copiedSecureInput: overlay.show(.done(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), undo: false))
+            case .pasted:
+                keysSinceInsert = 0
+                overlay.show(.done(L("Original inserted", "Original eingefügt"), undo: false))
+            case .copiedToClipboard, .appChanged, .copiedSecureInput: overlay.show(Self.originalCopiedNotice)
+            case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
+            }
+        }
+    }
+
+    /// Text of an automatically stopped session, inserted only by a click on its pill. `selection` is
+    /// the text a rewrite replaces; it must still be selected then.
+    private struct PendingInsert {
+        let text: String
+        let selection: String?
+    }
+
+    /// "Insert" on the pill of an automatically stopped recording. The panel never takes focus, so the
+    /// click leaves the cursor where the user has it now: that is where the text goes.
+    private func insertPendingAutoStop() {
+        guard let pending = pendingAutoStop else { return }
+        guard case .idle = phase else {
+            overlay.show(Self.busyNotice)
+            return
+        }
+        pendingAutoStop = nil
+        overlay.show(.hidden)
+        Task {
+            if let selection = pending.selection,
+               !PasteTargetRules.rewriteMayReplace(captured: selection, current: await TextInserter.currentSelection()) {
+                TextInserter.copyTemporarily(pending.text)
+                overlay.show(.notice(L("Selection changed – rewrite copied, press ⌘V", "Markierung geändert – Umformulierung kopiert, ⌘V drücken"), symbol: "doc.on.clipboard"))
+                return
+            }
+            switch await TextInserter.insert(pending.text, recordsUndo: false) {
+            case .pasted:
+                keysSinceInsert = 0
+                overlay.show(.done(L("Inserted", "Eingefügt"), undo: false))
+            case .copiedSecureInput: overlay.show(Self.secureInputNotice)
+            case .copiedToClipboard, .appChanged: overlay.show(Self.copiedNotice)
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
         }
@@ -643,13 +796,15 @@ final class DictationController {
 
     private func finishRewrite(samples: [Float], id: UUID) async {
         let app = sessionApp
+        let autoStopped = autoStoppedSession == id
         let selection = await selectionTask?.value
         guard let selection else {
-            showError(L("No text selected", "Kein Text markiert"), action: nil)
+            showError(L("No text selected – select text, then try again", "Kein Text markiert – erst Text markieren"), action: nil)
             return
         }
         guard let llm else {
-            showError(L("AI is turned off in settings", "KI ist in den Einstellungen aus"), action: nil)
+            showError(L("Rewriting needs the AI – it is off in settings", "Umformulieren braucht die KI – sie ist in den Einstellungen aus"),
+                      action: { [weak self] in self?.openSettings?() }, actionTitle: L("Settings", "Einstellungen"))
             return
         }
         // The selection must not reach the AI server where a password field may be invisible.
@@ -657,31 +812,41 @@ final class DictationController {
             showError(L("Secure input active – AI off", "Gesicherte Eingabe aktiv – KI aus"), action: nil)
             return
         }
+        // Probe the paste target and save the clipboard while the instruction is transcribed and applied.
+        let preparation = autoStopped ? nil : Task { await TextInserter.prepare() }
         guard samples.count >= 16_000 / 3,
               let instruction = try? await transcriber.transcribe(samples),
               !instruction.trimmingCharacters(in: .whitespaces).isEmpty
         else {
-            overlay.show(.hidden)
+            overlay.show(.notice(L("Instruction not understood – please say it again", "Anweisung nicht verstanden – nochmal sprechen"), symbol: "questionmark.bubble"))
             return
         }
         do {
             overlay.model.committedText = instruction
             overlay.model.partialText = ""
             let rewritten = try await llm.rewrite(selection: selection, instruction: instruction)
+            if autoStopped {
+                // Not pasted over the selection while nobody may be at the Mac; the pill offers it.
+                pendingAutoStop = PendingInsert(text: rewritten, selection: selection)
+                overlay.show(.autoStopped(L("Stopped automatically", "Automatisch beendet")))
+                return
+            }
             // The selection may have changed while the model worked: then the paste would overwrite
             // other text, so the rewrite is copied instead.
             let stillSelected = PasteTargetRules.rewriteMayReplace(captured: selection, current: await TextInserter.currentSelection())
             let outcome: InsertOutcome
             var selectionChanged = false
             if stillSelected {
-                outcome = await TextInserter.insert(rewritten, expectedApp: app, onPasted: { [weak self] in
+                let prepared = await preparation?.value
+                outcome = await TextInserter.insert(rewritten, expectedApp: app, prepared: prepared, onPasted: { [weak self] in
                     guard let self else { return }
+                    self.keysSinceInsert = 0
                     if self.settings.playSounds { self.sounds.playStop() }
                     self.overlay.show(.done(L("Rewritten", "Umformuliert"), undo: false))
                     self.readyForNext(id)
                 })
             } else {
-                TextInserter.copy(rewritten)
+                TextInserter.copyTemporarily(rewritten)
                 selectionChanged = true
                 outcome = .copiedToClipboard
             }
@@ -689,27 +854,51 @@ final class DictationController {
             switch outcome {
             case .pasted: break
             case .copiedToClipboard where selectionChanged:
-                overlay.show(.done(L("Selection changed – rewrite copied, press ⌘V", "Markierung geändert – Umformulierung kopiert, ⌘V drücken"), undo: false))
-            case .copiedToClipboard: overlay.show(.done(L("Rewritten – copied, press ⌘V", "Umformuliert – kopiert, ⌘V drücken"), undo: false))
-            case .copiedSecureInput: overlay.show(.done(Self.secureInputMessage, undo: false))
-            case .appChanged: overlay.show(.done(Self.appChangedMessage, undo: false))
+                overlay.show(.notice(L("Selection changed – rewrite copied, press ⌘V", "Markierung geändert – Umformulierung kopiert, ⌘V drücken"), symbol: "doc.on.clipboard"))
+            case .copiedToClipboard:
+                overlay.show(.notice(L("Rewritten – copied, press ⌘V", "Umformuliert – kopiert, ⌘V drücken"), symbol: "doc.on.clipboard"))
+            case .copiedSecureInput: overlay.show(Self.secureInputNotice)
+            case .appChanged: overlay.show(Self.appChangedNotice)
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
         } catch LLMError.tooLong {
             showError(L("Selection too long for the built-in AI – text unchanged", "Markierung zu lang für die eingebaute KI – Text unverändert"), action: nil)
         } catch LLMError.rejectedOutput {
             showError(L("AI answer did not look like a rewrite – text unchanged", "KI-Antwort war keine Umformulierung – Text unverändert"), action: nil)
+        } catch LLMError.unreachable where settings.llmBackend == .builtin {
+            // The built-in client says "unreachable" when the model file is missing.
+            showError(L("AI model missing – text unchanged", "KI-Modell fehlt – Text unverändert"),
+                      action: { [weak self] in self?.openSettings?() }, actionTitle: L("Settings", "Einstellungen"))
+        } catch LLMError.timeout where settings.llmBackend == .builtin && !LlamaEngine.shared.isLoaded {
+            showError(L("AI model could not be loaded – text unchanged", "KI-Modell konnte nicht geladen werden – Text unverändert"),
+                      action: { [weak self] in self?.openSettings?() }, actionTitle: L("Settings", "Einstellungen"))
+        } catch LLMError.timeout {
+            showError(L("AI took too long – text unchanged", "KI hat zu lange gebraucht – Text unverändert"), action: nil)
         } catch {
-            showError(L("AI not reachable – text unchanged", "KI nicht erreichbar – Text unverändert"), action: nil)
+            showError(L("AI not reachable – text unchanged", "KI nicht erreichbar – Text unverändert"),
+                      action: { [weak self] in self?.openSettings?() }, actionTitle: L("Settings", "Einstellungen"))
         }
     }
 
-    private static var secureInputMessage: String {
-        L("Secure input active – copied, press ⌘V", "Gesicherte Eingabe aktiv – kopiert, ⌘V drücken")
+    // Hints that ask the user to act: shown longer and in orange, unlike the green "done".
+    private static var copiedNotice: OverlayState {
+        .notice(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), symbol: "doc.on.clipboard")
     }
 
-    private static var appChangedMessage: String {
-        L("Other app in front – copied, press ⌘V", "Andere App im Vordergrund – kopiert, ⌘V drücken")
+    private static var originalCopiedNotice: OverlayState {
+        .notice(L("Original copied – press ⌘V", "Original kopiert – ⌘V drücken"), symbol: "doc.on.clipboard")
+    }
+
+    private static var secureInputNotice: OverlayState {
+        .notice(L("Secure input active – copied, press ⌘V", "Gesicherte Eingabe aktiv – kopiert, ⌘V drücken"), symbol: "lock.fill")
+    }
+
+    private static var appChangedNotice: OverlayState {
+        .notice(L("Other app in front – copied, press ⌘V", "Andere App im Vordergrund – kopiert, ⌘V drücken"), symbol: "macwindow.on.rectangle")
+    }
+
+    private static var busyNotice: OverlayState {
+        .notice(L("Busy – try again in a moment", "Gerade beschäftigt – gleich nochmal versuchen"), symbol: "hourglass")
     }
 
     private func teardown() {
@@ -727,9 +916,10 @@ final class DictationController {
         previewTask = nil
     }
 
-    private func showError(_ message: String, action: (() -> Void)?) {
+    private func showError(_ message: String, action: (() -> Void)?, actionTitle: String? = nil) {
         errorAction = action
         overlay.model.errorActionable = action != nil
+        overlay.model.actionTitle = action != nil ? actionTitle : nil
         overlay.show(.error(message))
     }
 
@@ -737,23 +927,25 @@ final class DictationController {
 
     /// Paste the most recent dictation again at the cursor.
     func pasteLast() {
-        guard let last = history.items.first else {
-            overlay.show(.done(L("Nothing to paste (history empty or off)", "Nichts einzufügen (Verlauf leer oder aus)"), undo: false))
+        // Without a history the last automatically stopped dictation is still kept in memory.
+        let fallback = pendingAutoStop?.selection == nil ? pendingAutoStop?.text : nil
+        guard let last = history.items.first?.final ?? fallback else {
+            overlay.show(.notice(L("Nothing to paste (history empty or off)", "Nichts einzufügen (Verlauf leer oder aus)"), symbol: "tray"))
             return
         }
         // Not while a dictation is recording or being inserted: it would paste in between and mix up
         // the clipboard handling of that session.
         guard case .idle = phase else {
-            overlay.show(.done(L("Busy – try again in a moment", "Gerade beschäftigt – gleich nochmal versuchen"), undo: false))
+            overlay.show(Self.busyNotice)
             return
         }
         Task {
             // Give the menu time to close so the previous app has focus again.
             try? await Task.sleep(nanoseconds: 250_000_000)
-            switch await TextInserter.insert(last.final, recordsUndo: false) {
-            case .pasted: break
-            case .copiedSecureInput: overlay.show(.done(Self.secureInputMessage, undo: false))
-            case .copiedToClipboard, .appChanged: overlay.show(.done(L("No text field – copied, press ⌘V", "Kein Textfeld – kopiert, ⌘V drücken"), undo: false))
+            switch await TextInserter.insert(last, recordsUndo: false) {
+            case .pasted: keysSinceInsert = 0
+            case .copiedSecureInput: overlay.show(Self.secureInputNotice)
+            case .copiedToClipboard, .appChanged: overlay.show(Self.copiedNotice)
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
         }
@@ -763,4 +955,13 @@ final class DictationController {
         history.clear()
         state.history = []
     }
+
+    /// Deletes one dictation from the history (History tab).
+    func removeHistory(id: UUID) {
+        history.remove(id: id)
+        state.history = history.items
+    }
+
+    /// An interrupted download left a partial file: the button continues it.
+    var hasPartialDownload: Bool { modelStore.partialBytes(modelSpec) > 0 }
 }

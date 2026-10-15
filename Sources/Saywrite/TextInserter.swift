@@ -41,11 +41,36 @@ enum TextInserter {
 
     /// Whether ⌘Z in the target of the last paste reliably undoes exactly that paste.
     private(set) static var lastPasteSupportsUndo = false
+    /// The generation of a fallback copy (`copyTemporarily`) that waits for the user's own ⌘V.
+    private static var manualPasteGeneration: Int?
+    /// How long a fallback copy may hold the clipboard when the user never pastes it.
+    private static let manualPasteHold: UInt64 = 60_000_000_000
 
-    private struct Probe: Sendable {
+    fileprivate struct Probe: Sendable {
         var elementIsSecure: Bool
         var secureInputEnabled: Bool
         var target: PasteTarget
+    }
+
+    /// The Accessibility probe and the clipboard snapshot, taken right after the recording ended while
+    /// the text is still being prepared, so the paste itself only checks they are still valid.
+    struct Preparation {
+        fileprivate let pid: pid_t
+        fileprivate let probe: Probe
+        fileprivate let clipboard: [SavedItem]?
+        fileprivate let changeCount: Int
+    }
+
+    /// Starts the probe in the background and saves the clipboard now (cheap types only).
+    static func prepare() async -> Preparation? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let bundleID = app.bundleIdentifier ?? ""
+        let electron = isElectron(app)
+        let pid = app.processIdentifier
+        let probing = Task.detached { probe(bundleID: bundleID, pid: pid, isElectron: electron) }
+        let changeCount = NSPasteboard.general.changeCount
+        let clipboard = savePasteboard()
+        return Preparation(pid: pid, probe: await probing.value, clipboard: clipboard, changeCount: changeCount)
     }
 
     /// Whether any app holds secure event input. System-wide: not proof that the focus is a password field.
@@ -124,55 +149,57 @@ enum TextInserter {
     /// (sound, closing the panel) is not delayed by the restore wait.
     /// `recordsUndo` is false for a paste that belongs to no running dictation ("Paste last"), so it
     /// does not change whether the pill of another dictation offers "Original".
-    static func insert(_ text: String, expectedApp: String? = nil, recordsUndo: Bool = true, onPasted: (() -> Void)? = nil) async -> InsertOutcome {
+    /// `prepared`: the probe and clipboard snapshot from `prepare()`. Used only while the same app is in
+    /// front, secure input has not changed and the clipboard is unchanged; otherwise taken again here.
+    static func insert(_ text: String, expectedApp: String? = nil, recordsUndo: Bool = true, prepared: Preparation? = nil,
+                       onPasted: (() -> Void)? = nil) async -> InsertOutcome {
         let pasteboard = NSPasteboard.general
         // Only a missing frontmost app means "nowhere to paste" up front; Electron apps (Slack,
         // VS Code, Discord) often expose no focused element but accept ⌘V.
         guard let app = NSWorkspace.shared.frontmostApplication else {
-            copy(text)
+            copyTemporarily(text)
             return .copiedToClipboard
         }
         let bundleID = app.bundleIdentifier ?? ""
         if let expectedApp, bundleID != expectedApp {
             Debug.log("paste target changed from \(expectedApp) to \(bundleID): copying")
-            copy(text)
+            copyTemporarily(text)
             return .appChanged
         }
         let electron = isElectron(app)
         let pid = app.processIdentifier
-        let probed = await Task.detached { probe(bundleID: bundleID, pid: pid, isElectron: electron) }.value
+        let probed: Probe
+        if let prepared, prepared.pid == pid, prepared.probe.secureInputEnabled == IsSecureEventInputEnabled() {
+            // A password field taking the focus meanwhile switches secure input on: then probe again.
+            probed = prepared.probe
+        } else {
+            probed = await Task.detached { probe(bundleID: bundleID, pid: pid, isElectron: electron) }.value
+        }
         let target = probed.target
         switch SecureInputRules.decide(elementIsSecure: probed.elementIsSecure, secureInputEnabled: probed.secureInputEnabled, target: target) {
         case .secureField: return .secureField
         case .copyOnly:
             Debug.log("secure input active, focus unknown in \(bundleID): copying")
-            copy(text)
+            copyTemporarily(text)
             return .copiedSecureInput
         case .proceed: break
         }
         Debug.log("paste target \(target) in \(bundleID)")
         if recordsUndo { lastPasteSupportsUndo = target == .textField }
         guard target != .none else {
-            copy(text)
+            copyTemporarily(text)
             return .copiedToClipboard
         }
         // The probe ran in the background: the user may have switched apps meanwhile.
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
-            copy(text)
+            copyTemporarily(text)
             return .appChanged
         }
-        // Save the user's clipboard, unless one of our own pastes is still pending (then its saved
-        // copy is the real one). If the user copied something meanwhile, that is the new original.
-        if userClipboard == nil || pasteboard.changeCount != lastWrittenChangeCount {
-            userClipboard = .some(savePasteboard())
-        }
+        saveUserClipboard(prepared: prepared)
         pasteGeneration += 1
+        manualPasteGeneration = nil
         let generation = pasteGeneration
-        pasteboard.clearContents()
-        let item = NSPasteboardItem()
-        item.setString(text, forType: .string)
-        for type in transientTypes { item.setString("", forType: type) }
-        pasteboard.writeObjects([item])
+        write(text)
         let changeCount = pasteboard.changeCount
         lastWrittenChangeCount = changeCount
         postCommand(key: CGKeyCode(kVK_ANSI_V))
@@ -190,8 +217,64 @@ enum TextInserter {
         return .pasted
     }
 
-    /// Puts text on the clipboard for a manual ⌘V, marked so clipboard managers do not record it.
+    /// Puts text on the clipboard because the user asked for it (menu "copy"): it stays there.
     static func copy(_ text: String) {
+        write(text)
+    }
+
+    /// Puts text on the clipboard for a manual ⌘V when pasting was not possible. The user's own
+    /// clipboard comes back shortly after the user's first ⌘V, or after a minute without one; not if
+    /// the user copied something else meanwhile.
+    static func copyTemporarily(_ text: String) {
+        saveUserClipboard(prepared: nil)
+        pasteGeneration += 1
+        let generation = pasteGeneration
+        manualPasteGeneration = generation
+        write(text)
+        lastWrittenChangeCount = NSPasteboard.general.changeCount
+        Task {
+            try? await Task.sleep(nanoseconds: manualPasteHold)
+            restoreIfCurrent(generation)
+        }
+    }
+
+    /// Called for every ⌘V the user types: the app reads the clipboard right after the key press,
+    /// so the user's clipboard is given back a moment later.
+    static func userPressedPaste() {
+        guard let generation = manualPasteGeneration, generation == pasteGeneration else { return }
+        manualPasteGeneration = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            restoreIfCurrent(generation)
+        }
+    }
+
+    /// Whether a fallback copy still holds the clipboard.
+    static var holdsTemporaryCopy: Bool { manualPasteGeneration != nil }
+
+    private static func restoreIfCurrent(_ generation: Int) {
+        guard generation == pasteGeneration else { return }
+        if manualPasteGeneration == generation { manualPasteGeneration = nil }
+        if NSPasteboard.general.changeCount == lastWrittenChangeCount, case .some(.some(let saved)) = userClipboard {
+            restorePasteboard(saved)
+        }
+        userClipboard = nil
+    }
+
+    /// Saves the user's clipboard, unless one of our own entries is still waiting to be replaced (then
+    /// its saved copy is the real one). If the user copied something meanwhile, that is the new original.
+    private static func saveUserClipboard(prepared: Preparation?) {
+        let pasteboard = NSPasteboard.general
+        guard userClipboard == nil || pasteboard.changeCount != lastWrittenChangeCount else { return }
+        if let prepared, prepared.changeCount == pasteboard.changeCount {
+            userClipboard = .some(prepared.clipboard)
+        } else {
+            userClipboard = .some(savePasteboard())
+        }
+    }
+
+    /// Our own clipboard entry, marked so clipboard managers do not record it.
+    private static func write(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let item = NSPasteboardItem()
@@ -232,6 +315,7 @@ enum TextInserter {
         // .some(nil): the original could not be saved (too large); never restore our own text then.
         let saved: [SavedItem]? = pendingOriginal != nil ? pendingOriginal! : savePasteboard()
         pasteGeneration += 1
+        manualPasteGeneration = nil
         userClipboard = nil
         let before = pasteboard.changeCount
         postCommand(key: CGKeyCode(kVK_ANSI_C))
@@ -292,18 +376,20 @@ enum TextInserter {
         }
     }
 
-    private typealias SavedItem = [(NSPasteboard.PasteboardType, Data)]
+    fileprivate typealias SavedItem = [(NSPasteboard.PasteboardType, Data)]
 
     /// Nil when the clipboard holds something too big or lazy (file promises) to copy safely;
-    /// then it is not restored rather than half-restored.
+    /// then it is not restored rather than half-restored. Only cheap representations are read
+    /// (`ClipboardSnapshotRules`): reading every type made Excel or Photoshop render all their formats
+    /// while the main thread, and with it every key press in the system, waited.
     private static func savePasteboard() -> [SavedItem]? {
         let items = NSPasteboard.general.pasteboardItems ?? []
         var saved: [SavedItem] = []
         var total = 0
         for item in items {
             var entries: SavedItem = []
-            for type in item.types {
-                if type.rawValue.contains("promise") { return nil }
+            guard let types = ClipboardSnapshotRules.typesToSave(item.types.map(\.rawValue)) else { return nil }
+            for type in types.map({ NSPasteboard.PasteboardType(rawValue: $0) }) {
                 guard let data = item.data(forType: type) else { continue }
                 total += data.count
                 if total > 20_000_000 { return nil }
