@@ -14,6 +14,8 @@ enum InsertOutcome {
     case copiedSecureInput
     /// Another app came to the front while the text was being prepared: copied instead of pasted.
     case appChanged
+    /// The session was cancelled (Esc) while the paste target was probed: nothing pasted or copied.
+    case cancelled
 }
 
 /// Puts text at the cursor of the frontmost app and reads the current selection.
@@ -151,8 +153,10 @@ enum TextInserter {
     /// does not change whether the pill of another dictation offers "Original".
     /// `prepared`: the probe and clipboard snapshot from `prepare()`. Used only while the same app is in
     /// front, secure input has not changed and the clipboard is unchanged; otherwise taken again here.
+    /// `isCurrent`: asked after the probe, the only wait before the clipboard is touched; false (the
+    /// dictation was cancelled meanwhile) returns `.cancelled` without pasting or copying anything.
     static func insert(_ text: String, expectedApp: String? = nil, recordsUndo: Bool = true, prepared: Preparation? = nil,
-                       onPasted: (() -> Void)? = nil) async -> InsertOutcome {
+                       isCurrent: (() -> Bool)? = nil, onPasted: (() -> Void)? = nil) async -> InsertOutcome {
         let pasteboard = NSPasteboard.general
         // Only a missing frontmost app means "nowhere to paste" up front; Electron apps (Slack,
         // VS Code, Discord) often expose no focused element but accept ⌘V.
@@ -175,6 +179,7 @@ enum TextInserter {
         } else {
             probed = await Task.detached { probe(bundleID: bundleID, pid: pid, isElectron: electron) }.value
         }
+        if let isCurrent, !isCurrent() { return .cancelled }
         let target = probed.target
         switch SecureInputRules.decide(elementIsSecure: probed.elementIsSecure, secureInputEnabled: probed.secureInputEnabled, target: target) {
         case .secureField: return .secureField

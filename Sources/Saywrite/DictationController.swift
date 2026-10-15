@@ -652,7 +652,8 @@ final class DictationController {
         // Whatever the cancelled finish still delivers belongs to an old session and is dropped.
         sessionID = UUID()
         teardown()
-        overlay.show(.done(L("Cancelled", "Abgebrochen"), undo: false))
+        // Orange like the other hints that need no further action, so it is not read as "inserted".
+        overlay.show(.notice(L("Cancelled – nothing inserted", "Abgebrochen – nichts eingefügt"), symbol: "xmark.circle"))
     }
 
     /// Sleep, screen lock or a user switch: a running recording is thrown away, so it is not
@@ -713,12 +714,13 @@ final class DictationController {
         case .rewrite:
             await finishRewrite(samples: allSamples, id: id)
         }
+        // A new dictation may already have started right after the paste. Before any further await:
+        // while the phase is still .processing, Esc would announce a cancel of text already copied.
+        if sessionID == id { teardown() }
         if var timing, Debug.enabled {
             timing.lastTranscription = await transcriber.lastRun
             Debug.log("timing: \(timing.summary())")
         }
-        // A new dictation may already have started right after the paste.
-        if sessionID == id { teardown() }
     }
 
     /// Ready for the next dictation as soon as the text landed (the clipboard restore runs on).
@@ -766,26 +768,34 @@ final class DictationController {
             readyForNext(id)
             return
         }
+        let prepared = await preparation?.value
+        // Cancelled while the probe finished: nothing is inserted, copied or kept in the history.
+        guard sessionID == id else { return }
         overlay.model.committedText = result.final
         overlay.model.partialText = ""
         let hasOriginal = result.withoutAI != nil
         if hasOriginal { undoCandidate = result }
-        let prepared = await preparation?.value
-        let outcome = await TextInserter.insert(result.final, expectedApp: sessionApp, prepared: prepared, onPasted: { [weak self] in
-            // Sound and panel react the moment the text lands, not after the clipboard restore.
-            guard let self else { return }
-            self.keysSinceInsert = 0
-            if self.settings.playSounds { self.sounds.playStop() }
-            let undo = hasOriginal && TextInserter.lastPasteSupportsUndo
-            if !undo { self.undoCandidate = nil }
-            self.overlay.show(.done(result.summary.text, undo: undo))
-            self.readyForNext(id)
-        })
+        let outcome = await TextInserter.insert(
+            result.final, expectedApp: sessionApp, prepared: prepared, isCurrent: { [weak self] in self?.sessionID == id },
+            onPasted: { [weak self] in
+                // Sound and panel react the moment the text lands, not after the clipboard restore.
+                guard let self else { return }
+                self.keysSinceInsert = 0
+                if self.settings.playSounds { self.sounds.playStop() }
+                let undo = hasOriginal && TextInserter.lastPasteSupportsUndo
+                if !undo { self.undoCandidate = nil }
+                self.overlay.show(.done(result.summary.text, undo: undo))
+                self.readyForNext(id)
+            })
+        if outcome == .cancelled {
+            undoCandidate = nil
+            return
+        }
         // A password field, or a possible one (secure input, focus unknown), never goes to the history file.
         if outcome != .secureField && outcome != .copiedSecureInput { appendToHistory(result) }
         if outcome != .pasted { undoCandidate = nil }
         switch outcome {
-        case .pasted:
+        case .pasted, .cancelled:
             break
         case .copiedToClipboard:
             overlay.show(Self.copiedNotice)
@@ -837,6 +847,7 @@ final class DictationController {
                 overlay.show(.done(L("Original inserted", "Original eingefügt"), undo: false))
             case .copiedToClipboard, .appChanged, .copiedSecureInput: overlay.show(Self.originalCopiedNotice)
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
+            case .cancelled: break // only with isCurrent, which these pastes do not pass
             }
         }
     }
@@ -872,6 +883,7 @@ final class DictationController {
             case .copiedSecureInput: overlay.show(Self.secureInputNotice)
             case .copiedToClipboard, .appChanged: overlay.show(Self.copiedNotice)
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
+            case .cancelled: break // only with isCurrent, which these pastes do not pass
             }
         }
     }
@@ -918,17 +930,21 @@ final class DictationController {
             // The selection may have changed while the model worked: then the paste would overwrite
             // other text, so the rewrite is copied instead.
             let stillSelected = PasteTargetRules.rewriteMayReplace(captured: selection, current: await TextInserter.currentSelection())
+            let prepared = stillSelected ? await preparation?.value : nil
+            // Cancelled while the selection was read: nothing is pasted or copied.
+            guard sessionID == id else { return }
             let outcome: InsertOutcome
             var selectionChanged = false
             if stillSelected {
-                let prepared = await preparation?.value
-                outcome = await TextInserter.insert(rewritten, expectedApp: app, prepared: prepared, onPasted: { [weak self] in
-                    guard let self else { return }
-                    self.keysSinceInsert = 0
-                    if self.settings.playSounds { self.sounds.playStop() }
-                    self.overlay.show(.done(L("Rewritten", "Umformuliert"), undo: false))
-                    self.readyForNext(id)
-                })
+                outcome = await TextInserter.insert(
+                    rewritten, expectedApp: app, prepared: prepared, isCurrent: { [weak self] in self?.sessionID == id },
+                    onPasted: { [weak self] in
+                        guard let self else { return }
+                        self.keysSinceInsert = 0
+                        if self.settings.playSounds { self.sounds.playStop() }
+                        self.overlay.show(.done(L("Rewritten", "Umformuliert"), undo: false))
+                        self.readyForNext(id)
+                    })
             } else {
                 TextInserter.copyTemporarily(rewritten)
                 selectionChanged = true
@@ -936,7 +952,7 @@ final class DictationController {
             }
             // A rewrite is not written to the history: its result is the user's own document.
             switch outcome {
-            case .pasted: break
+            case .pasted, .cancelled: break
             case .copiedToClipboard where selectionChanged:
                 overlay.show(.notice(L("Selection changed – rewrite copied, press ⌘V", "Markierung geändert – Umformulierung kopiert, ⌘V drücken"), symbol: "doc.on.clipboard"))
             case .copiedToClipboard:
@@ -1034,6 +1050,7 @@ final class DictationController {
             case .copiedSecureInput: overlay.show(Self.secureInputNotice)
             case .copiedToClipboard, .appChanged: overlay.show(Self.copiedNotice)
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
+            case .cancelled: break // only with isCurrent, which these pastes do not pass
             }
         }
     }
