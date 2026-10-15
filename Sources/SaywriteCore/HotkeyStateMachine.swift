@@ -12,7 +12,7 @@ public enum HotkeyEvent: Sendable, Equatable {
     case confirmed(HotkeyAction)
     /// Key released after a hold, or tapped again in hands-free mode: finish and insert.
     case end(HotkeyAction)
-    /// Shortcut (another key pressed while holding) or Escape: throw the recording away.
+    /// Shortcut (another key or a click while holding) or Escape: throw the recording away.
     case cancel(HotkeyAction)
     /// Short tap: keep recording hands-free until the key is tapped again.
     case handsFree(HotkeyAction)
@@ -22,14 +22,21 @@ public enum HotkeyEvent: Sendable, Equatable {
 /// The monitor feeds it key events and delivers the returned events.
 public struct HotkeyStateMachine: Sendable {
     public let minimumHold: TimeInterval
+    /// A hold that saw a key and ended before this is a slow shortcut, not a dictation.
+    public let lateShortcutWindow: TimeInterval
 
     public private(set) var active: HotkeyAction?
     public private(set) var pressTime: Date?
     public private(set) var interrupted = false
     public private(set) var handsFree = false
+    /// The hold lasted past `minimumHold`: from here on it is a dictation, not a shortcut.
+    public private(set) var confirmed = false
+    /// A key was pressed after the confirmation; decided on release (see `triggerUp`).
+    private var keyAfterConfirmation = false
 
-    public init(minimumHold: TimeInterval = 0.3) {
+    public init(minimumHold: TimeInterval = 0.3, lateShortcutWindow: TimeInterval = 1.5) {
         self.minimumHold = minimumHold
+        self.lateShortcutWindow = lateShortcutWindow
     }
 
     /// The trigger that is physically held right now, if any.
@@ -41,6 +48,8 @@ public struct HotkeyStateMachine: Sendable {
         pressTime = nil
         handsFree = false
         interrupted = false
+        confirmed = false
+        keyAfterConfirmation = false
     }
 
     /// Escape cancels a recording; `consumed` means it must not reach the app underneath.
@@ -55,9 +64,24 @@ public struct HotkeyStateMachine: Sendable {
         return (otherKey(), false)
     }
 
-    /// Another key while holding the trigger means the user typed a shortcut (e.g. ⌥L for @).
+    /// Another key while holding the trigger means the user typed a shortcut (e.g. ⌥L for @) – but
+    /// only within the shortcut window. After the confirmation the recording is a dictation, and a
+    /// stray key must not throw away a long recording; the stop tap of hands-free mode ignores keys too.
     public mutating func otherKey() -> [HotkeyEvent] {
-        guard let active, pressTime != nil, !interrupted else { return [] }
+        guard let active, pressTime != nil, !interrupted, !handsFree else { return [] }
+        if confirmed {
+            keyAfterConfirmation = true
+            return []
+        }
+        interrupted = true
+        return [.cancel(active)]
+    }
+
+    /// A click or scroll while holding the trigger is a modifier click (⌘-click, ⌥-click), at any
+    /// time of the hold: nobody clicks on purpose with the dictation key held. Hands-free recordings
+    /// are not affected, there the key is up while the user works with the mouse.
+    public mutating func pointer() -> [HotkeyEvent] {
+        guard let active, pressTime != nil, !interrupted, !handsFree else { return [] }
         interrupted = true
         return [.cancel(active)]
     }
@@ -74,18 +98,22 @@ public struct HotkeyStateMachine: Sendable {
             guard action == active else { return [] }
             pressTime = now
             interrupted = false
+            keyAfterConfirmation = false
             return []
         }
         guard active == nil else { return [] }
         active = action
         pressTime = now
         interrupted = false
+        confirmed = false
+        keyAfterConfirmation = false
         return [.begin(action)]
     }
 
     /// The hold timer started with `.begin` fired.
-    public func confirmation() -> HotkeyEvent? {
+    public mutating func confirmation() -> HotkeyEvent? {
         guard let active, pressTime != nil, !interrupted else { return nil }
+        confirmed = true
         return .confirmed(active)
     }
 
@@ -105,6 +133,9 @@ public struct HotkeyStateMachine: Sendable {
         }
         if held >= minimumHold {
             active = nil
+            // A key during the hold and a release soon after: a slowly typed shortcut (⌥ held a
+            // moment, then L for @), not a dictation. A long recording with a stray key is kept.
+            if keyAfterConfirmation, held < lateShortcutWindow { return [.cancel(action)] }
             return [.end(action)]
         }
         // Short tap: the recording that started on key down simply continues hands-free.

@@ -51,7 +51,15 @@ final class DictationController {
     private var peakLevel: Float = 0
 
     private enum Phase { case idle, recording(HotkeyAction), processing }
-    private var phase: Phase = .idle
+    private var phase: Phase = .idle {
+        didSet { phaseChanged() }
+    }
+    /// The work after the release, kept so Esc (or a cancel) can stop it before anything is inserted.
+    private var finishTask: Task<Void, Never>?
+    /// Keeps the display awake during a recording (see `prepare`).
+    private var recordingActivity: NSObjectProtocol?
+    /// Debug timing of the current finish, from the release of the key.
+    private var timing: FinishTiming?
     /// Identifies the current session so late async work from an old one is ignored.
     private var sessionID = UUID()
     private var session: DictationSession?
@@ -90,6 +98,7 @@ final class DictationController {
         state.history = history.items
 
         hotkeys.onEvent = { [weak self] event in self?.handle(event) }
+        hotkeys.onProcessingEscape = { [weak self] in self?.cancelProcessing() }
         overlay.onStop = { [weak self] in self?.stopFromOverlay() }
         overlay.onUndo = { [weak self] in self?.insertOriginal() }
         audio.onDeviceLost = { [weak self] in
@@ -355,6 +364,17 @@ final class DictationController {
     private func prepare(_ action: HotkeyAction) {
         guard !prepared else { return }
         prepared = true
+        if case .recording = phase {
+            // A Bluetooth microphone opens only now (see AudioCapture.start).
+            audio.startDeferred()
+            // The Neural Engine sleeps after some idle time; wake it while the user still talks.
+            let transcriber = transcriber
+            Task.detached { await transcriber.prewarm() }
+            // A long hands-free dictation without touching the Mac must not run into display sleep,
+            // which cancels the recording (see cancelRecording).
+            recordingActivity = ProcessInfo.processInfo.beginActivity(
+                options: [.idleDisplaySleepDisabled, .idleSystemSleepDisabled], reason: "Dictation recording")
+        }
         if let llm {
             // Switching the engine in the settings meanwhile must not load the built-in model again.
             let backend = settings.llmBackend
@@ -427,22 +447,13 @@ final class DictationController {
             }
         }
         audio.setSampleHandler { chunk in continuation.yield(chunk) }
-        audio.preferredDeviceUID = settings.inputDeviceUID.isEmpty ? nil : settings.inputDeviceUID
-
-        do {
-            try audio.start()
-        } catch {
-            audio.setSampleHandler(nil)
-            continuation.finish()
-            teardown()
-            hotkeys.reset()
-            if Permissions.microphoneStatus != .granted {
-                showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings)
-            } else {
-                showError(L("Microphone could not start", "Mikrofon konnte nicht starten"), action: nil)
-            }
-            return
-        }
+        // Starts in the background: this runs inside the key handling, which every key press of the
+        // user waits for. Only rewrite needs the whole recording at the end.
+        let id = sessionID
+        audio.start(
+            deviceUID: settings.inputDeviceUID.isEmpty ? nil : settings.inputDeviceUID,
+            keepSamples: action == .rewrite, deferBluetooth: true
+        ) { [weak self] in self?.audioStartFailed(id) }
         phase = .recording(action)
         recordingStart = Date()
         lastVoice = Date()
@@ -452,6 +463,17 @@ final class DictationController {
         // Right ⌥ is also used for @, € and brackets: the panel and sound only appear once it is
         // clearly a dictation (tap for hands-free, or held past the shortcut window).
         startPreview(session: session, segmenter: segmenter, id: sessionID)
+    }
+
+    private func audioStartFailed(_ id: UUID) {
+        guard sessionID == id, case .recording = phase else { return }
+        hotkeys.reset()
+        cancel()
+        if Permissions.microphoneStatus != .granted {
+            showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings)
+        } else {
+            showError(L("Microphone could not start", "Mikrofon konnte nicht starten"), action: nil)
+        }
     }
 
     private func showRecordingOverlay(_ action: HotkeyAction, handsFree: Bool) {
@@ -503,14 +525,15 @@ final class DictationController {
     private func requestFinish(_ action: HotkeyAction) {
         guard case .recording(let current) = phase, current == action else { return }
         phase = .processing
+        timing = FinishTiming(released: Date())
         previewTask?.cancel()
         if !prepared { prepare(action) }
-        Task { await finish(action) }
+        finishTask = Task { await finish(action) }
     }
 
     private func cancel() {
         previewTask?.cancel()
-        audio.stop()
+        audio.discard()
         audio.setSampleHandler(nil)
         chunkStream?.finish()
         chunkConsumer?.cancel()
@@ -523,20 +546,70 @@ final class DictationController {
         if wasShown { overlay.show(.hidden) }
     }
 
-    private func finish(_ action: HotkeyAction) async {
-        let id = sessionID
-        overlay.show(.processing)
-        // Keep recording a moment so the last syllable is not cut off.
-        try? await Task.sleep(nanoseconds: 150_000_000)
-        let allSamples = audio.stop()
+    /// Esc while the text is being prepared (transcription, AI, up to 30 s for a rewrite): nothing
+    /// is inserted.
+    func cancelProcessing() {
+        guard case .processing = phase else { return }
+        Debug.log("processing cancelled")
+        finishTask?.cancel()
+        audio.discard()
         audio.setSampleHandler(nil)
         chunkStream?.finish()
-        await chunkConsumer?.value
+        chunkConsumer?.cancel()
+        selectionTask?.cancel()
+        secureProbeTask?.cancel()
+        if let session { Task { await session.cancel() } }
+        // Whatever the cancelled finish still delivers belongs to an old session and is dropped.
+        sessionID = UUID()
+        teardown()
+        overlay.show(.done(L("Cancelled", "Abgebrochen"), undo: false))
+    }
+
+    /// Sleep, screen lock or a user switch: a running recording is thrown away, so it is not
+    /// inserted later into whatever is in front then.
+    func cancelRecording(because reason: String) {
+        guard case .recording = phase else { return }
+        Debug.log("recording cancelled: \(reason)")
+        hotkeys.reset()
+        cancel()
+    }
+
+    private func phaseChanged() {
+        if case .processing = phase { hotkeys.escapeCancelsProcessing = true } else { hotkeys.escapeCancelsProcessing = false }
+        if case .recording = phase { return }
+        if let recordingActivity { ProcessInfo.processInfo.endActivity(recordingActivity) }
+        recordingActivity = nil
+    }
+
+    /// The VAD says nobody speaks and the last 100 ms are quiet: the grace period after the release
+    /// would only add delay.
+    private func tailIsSilent() async -> Bool {
+        guard let segmenter else { return false }
+        let tail = await segmenter.tail(RecordingTail.window)
+        return RecordingTail.canStopNow(isSpeaking: tail.speaking, recent: tail.samples)
+    }
+
+    private func finish(_ action: HotkeyAction) async {
+        let id = sessionID
+        let stream = chunkStream, consumer = chunkConsumer, probe = secureProbeTask
+        overlay.show(.processing)
+        // Keep recording a moment so the last syllable is not cut off – unless all is quiet already.
+        if await !tailIsSilent() {
+            try? await Task.sleep(nanoseconds: UInt64(RecordingTail.grace * 1_000_000_000))
+        }
+        // Cancelled meanwhile (Esc, sleep): cancelProcessing cleaned up, and a new recording may run.
+        guard sessionID == id, !Task.isCancelled else { return }
+        let allSamples = await audio.stop()
+        timing?.audioStopped = Date()
+        audio.setSampleHandler(nil)
+        stream?.finish()
+        await consumer?.value
 
         // A short press reaches this point before the password-field probe answered: wait for it, so
         // nothing is transcribed or sent to the AI server for a password field.
-        await secureProbeTask?.value
-        if secureFieldSeen, sessionID == id {
+        await probe?.value
+        guard sessionID == id else { return }
+        if secureFieldSeen {
             if let session { await session.cancel() }
             hotkeys.reset()
             showError(L("Password field – not recorded", "Passwortfeld – nicht aufgenommen"), action: nil)
@@ -550,6 +623,10 @@ final class DictationController {
         case .rewrite:
             await finishRewrite(samples: allSamples, id: id)
         }
+        if var timing, Debug.enabled {
+            timing.lastTranscription = await transcriber.lastRun
+            Debug.log("timing: \(timing.summary())")
+        }
         // A new dictation may already have started right after the paste.
         if sessionID == id { teardown() }
     }
@@ -557,6 +634,7 @@ final class DictationController {
     /// Ready for the next dictation as soon as the text landed (the clipboard restore runs on).
     private func readyForNext(_ id: UUID) {
         guard sessionID == id, case .processing = phase else { return }
+        timing?.inserted = Date()
         phase = .idle
         prepared = false
         startSoundPlayed = false
@@ -571,7 +649,11 @@ final class DictationController {
         if let rest = await segmenter.flush() {
             await session.addSegment(rest)
         }
-        guard let result = await session.finish() else {
+        let finished = await session.finish()
+        // Cancelled while the text was prepared: insert nothing, show nothing.
+        guard sessionID == id else { return }
+        timing?.textReady = Date()
+        guard let result = finished else {
             if peakLevel < 0.05 {
                 showError(L("No sound from the microphone – check the input device", "Kein Ton vom Mikrofon – Eingabegerät prüfen"),
                           action: Permissions.openMicrophoneSettings)
@@ -657,10 +739,10 @@ final class DictationController {
             showError(L("Secure input active – AI off", "Gesicherte Eingabe aktiv – KI aus"), action: nil)
             return
         }
-        guard samples.count >= 16_000 / 3,
-              let instruction = try? await transcriber.transcribe(samples),
-              !instruction.trimmingCharacters(in: .whitespaces).isEmpty
-        else {
+        var instruction: String?
+        if samples.count >= 16_000 / 3 { instruction = try? await transcriber.transcribe(samples) }
+        guard sessionID == id else { return }
+        guard let instruction, !instruction.trimmingCharacters(in: .whitespaces).isEmpty else {
             overlay.show(.hidden)
             return
         }
@@ -668,6 +750,8 @@ final class DictationController {
             overlay.model.committedText = instruction
             overlay.model.partialText = ""
             let rewritten = try await llm.rewrite(selection: selection, instruction: instruction)
+            guard sessionID == id else { return }
+            timing?.textReady = Date()
             // The selection may have changed while the model worked: then the paste would overwrite
             // other text, so the rewrite is copied instead.
             let stillSelected = PasteTargetRules.rewriteMayReplace(captured: selection, current: await TextInserter.currentSelection())
@@ -695,6 +779,8 @@ final class DictationController {
             case .appChanged: overlay.show(.done(Self.appChangedMessage, undo: false))
             case .secureField: showError(L("Password field – not inserted", "Passwortfeld – nicht eingefügt"), action: nil)
             }
+        } catch where sessionID != id {
+            return // cancelled: the aborted request is no error to show
         } catch LLMError.tooLong {
             showError(L("Selection too long for the built-in AI – text unchanged", "Markierung zu lang für die eingebaute KI – Text unverändert"), action: nil)
         } catch LLMError.rejectedOutput {
@@ -725,6 +811,7 @@ final class DictationController {
         selectionTask = nil
         secureProbeTask = nil
         previewTask = nil
+        finishTask = nil
     }
 
     private func showError(_ message: String, action: (() -> Void)?) {
