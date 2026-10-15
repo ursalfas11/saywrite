@@ -41,7 +41,7 @@ final class DictationSessionTests: XCTestCase {
 
     func testJoinsSegmentsInCaptureOrderEvenIfLaterFinishFirst() async {
         let transcriber = FakeTranscriber(
-            texts: [1: "Erster Satz.", 2: "zweiter Satz."],
+            texts: [1: "Erster Satz.", 2: "Zweiter Satz."],
             delays: [1: 200_000_000])
         let session = DictationSession(transcriber: transcriber, llm: nil, style: .neutral, appBundleID: nil)
         await session.addSegment([1])
@@ -70,7 +70,8 @@ final class DictationSessionTests: XCTestCase {
         await session.addSegment([1])
         await session.addSegment([2])
         let result = await session.finish()
-        XCTAssertEqual(result?.final, "Wir treffen uns morgen. Um vier.")
+        // The lowercase segment continues the sentence before the pause.
+        XCTAssertEqual(result?.final, "Wir treffen uns morgen um vier.")
         XCTAssertEqual(result?.summary.usedLLM, true)
         let calls = await llm.log.cleanups
         XCTAssertEqual(calls, ["um drei, nein, um vier."])

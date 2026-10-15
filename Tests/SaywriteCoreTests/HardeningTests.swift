@@ -185,7 +185,7 @@ final class CircuitBreakerTests: XCTestCase {
     override func setUp() { UILanguage.override = true }
     override func tearDown() { UILanguage.override = nil }
 
-    private let twoCorrections = [1: "um drei, nein, um vier.", 2: "am Montag, nein, am Dienstag."]
+    private let twoCorrections = [1: "um drei, nein, um vier.", 2: "Am Montag, nein, am Dienstag."]
 
     func testTimeoutStopsFurtherCallsInTheSameDictation() async {
         let llm = ThrowingLLM(error: .timeout)

@@ -17,7 +17,7 @@ actor ParakeetTranscriber: Transcriber {
     private var language: Language?
 
     func setLanguage(_ code: String) {
-        language = Language(rawValue: code)
+        language = Language(rawValue: DictationLanguage.recognizerHint(setting: code))
     }
 
     func load(progress: @escaping @Sendable (Double) -> Void) async throws {
