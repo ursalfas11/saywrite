@@ -21,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller = DictationController(
             settings: settings, state: state, overlay: overlay,
             history: HistoryStore(fileURL: HistoryStore.defaultFileURL()))
+        controller.openSettings = { [weak self] in self?.openSettings() }
+        // An accessory app has no menu bar, but its key equivalents (⌘V, ⌘C, ⌘A, ⌘Z, ⌘W) still come
+        // from the main menu: without one, text fields in the settings window cannot paste.
+        NSApp.mainMenu = Self.makeMainMenu()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Saywrite")
@@ -69,9 +73,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let status = NSMenuItem(title: statusLine, action: nil, keyEquivalent: "")
-        status.isEnabled = false
-        menu.addItem(status)
+        // The status lines open the settings, where each problem has its button.
+        for (line, problem) in statusLines {
+            let item = NSMenuItem(title: line, action: #selector(openSettings), keyEquivalent: "")
+            item.target = self
+            if problem { item.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil) }
+            menu.addItem(item)
+        }
+        if case .failed = state.modelState {
+            let retry = NSMenuItem(title: L("Load speech model again", "Sprachmodell erneut laden"), action: #selector(retryModelLoad), keyEquivalent: "")
+            retry.target = self
+            menu.addItem(retry)
+        }
         menu.addItem(.separator())
 
         let recent = NSMenuItem(title: L("Recent dictations", "Letzte Diktate"), action: nil, keyEquivalent: "")
@@ -97,9 +110,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pasteItem.isEnabled = !state.history.isEmpty
         menu.addItem(pasteItem)
 
-        let aiItem = NSMenuItem(title: L("AI cleanup", "KI-Aufräumen"), action: #selector(toggleAI), keyEquivalent: "")
+        // Switched on but not usable (model missing, Ollama down) is not a plain check mark.
+        let aiTitle = settings.aiEnabled && aiProblem != nil
+            ? L("AI cleanup (not available)", "KI-Aufräumen (nicht verfügbar)") : L("AI cleanup", "KI-Aufräumen")
+        let aiItem = NSMenuItem(title: aiTitle, action: #selector(toggleAI), keyEquivalent: "")
         aiItem.target = self
-        aiItem.state = settings.aiEnabled ? .on : .off
+        aiItem.state = settings.aiEnabled ? (aiProblem == nil ? .on : .mixed) : .off
         menu.addItem(aiItem)
 
         menu.addItem(.separator())
@@ -109,13 +125,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: L("Quit Saywrite", "Saywrite beenden"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
-    private var statusLine: String {
-        if !state.accessibilityGranted { return L("⚠ Accessibility access missing", "⚠ Bedienungshilfen fehlen") }
+    /// Each line with whether it is a problem. "Ready" only when nothing blocks a dictation.
+    private var statusLines: [(String, Bool)] {
+        var lines: [(String, Bool)] = []
+        if !state.accessibilityGranted { lines.append((L("Accessibility access missing", "Bedienungshilfen fehlen"), true)) }
+        if Permissions.microphoneStatus != .granted { lines.append((L("Microphone access missing", "Mikrofon-Zugriff fehlt"), true)) }
         switch state.modelState {
-        case .loading(let p): return L("Speech model loading… \(Int(p * 100))%", "Sprachmodell lädt … \(Int(p * 100)) %")
-        case .failed: return L("⚠ Speech model error", "⚠ Sprachmodell-Fehler")
-        case .ready: return L("Ready – tap \(settings.dictateKey.displayName)", "Bereit – \(settings.dictateKey.displayName) tippen")
+        case .loading(let p): lines.append((L("Speech model loading… \(Int(p * 100))%", "Sprachmodell lädt … \(Int(p * 100)) %"), false))
+        case .failed: lines.append((L("Speech model error", "Sprachmodell-Fehler"), true))
+        case .ready:
+            if lines.isEmpty {
+                lines.append((L("Ready – tap \(settings.dictateKey.displayName)", "Bereit – \(settings.dictateKey.displayName) tippen"), false))
+            }
         }
+        if settings.aiEnabled, let aiProblem { lines.append((aiProblem, true)) }
+        return lines
+    }
+
+    /// Why the switched-on AI cannot clean up right now, or nil.
+    private var aiProblem: String? {
+        switch settings.llmBackend {
+        case .builtin:
+            switch state.builtinState {
+            case .ready: return nil
+            case .downloading(let fraction):
+                return L("AI model downloading… \(Int(fraction * 100))%", "KI-Modell wird heruntergeladen … \(Int(fraction * 100)) %")
+            case .verifying, .optimizing: return L("AI model being prepared…", "KI-Modell wird vorbereitet …")
+            case .notDownloaded, .partial: return L("AI model not downloaded – rules only", "KI-Modell nicht heruntergeladen – nur Regeln")
+            case .failed: return L("AI model error – rules only", "KI-Modell-Fehler – nur Regeln")
+            }
+        case .ollama:
+            switch state.ollamaState {
+            case .ready, .unknown: return nil
+            case .unreachable: return L("Ollama not reachable – rules only", "Ollama nicht erreichbar – nur Regeln")
+            case .modelMissing: return L("Ollama model missing – rules only", "Ollama-Modell fehlt – nur Regeln")
+            }
+        }
+    }
+
+    @objc private func retryModelLoad() {
+        controller.retryModelLoad()
+    }
+
+    /// App, Edit and Window menus: never visible (accessory app), only there for the standard shortcuts.
+    private static func makeMainMenu() -> NSMenu {
+        let main = NSMenu()
+        func submenu(_ title: String, _ items: [NSMenuItem]) {
+            let menu = NSMenu(title: title)
+            for entry in items { menu.addItem(entry) }
+            let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            holder.submenu = menu
+            main.addItem(holder)
+        }
+        func item(_ title: String, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            return item
+        }
+        submenu("Saywrite", [
+            item(L("Hide Saywrite", "Saywrite ausblenden"), #selector(NSApplication.hide(_:)), "h"),
+            item(L("Quit Saywrite", "Saywrite beenden"), #selector(NSApplication.terminate(_:)), "q"),
+        ])
+        submenu(L("Edit", "Bearbeiten"), [
+            item(L("Undo", "Widerrufen"), Selector(("undo:")), "z"),
+            item(L("Redo", "Wiederholen"), Selector(("redo:")), "z", [.command, .shift]),
+            .separator(),
+            item(L("Cut", "Ausschneiden"), #selector(NSText.cut(_:)), "x"),
+            item(L("Copy", "Kopieren"), #selector(NSText.copy(_:)), "c"),
+            item(L("Paste", "Einsetzen"), #selector(NSText.paste(_:)), "v"),
+            item(L("Select All", "Alles auswählen"), #selector(NSText.selectAll(_:)), "a"),
+        ])
+        submenu(L("Window", "Fenster"), [
+            item(L("Close", "Schließen"), #selector(NSWindow.performClose(_:)), "w"),
+        ])
+        return main
     }
 
     @objc private func copyHistory(_ sender: NSMenuItem) {

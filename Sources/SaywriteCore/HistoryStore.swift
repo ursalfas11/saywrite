@@ -63,6 +63,19 @@ public final class HistoryStore: @unchecked Sendable {
         if changed { save(kept) }
     }
 
+    /// Deletes one entry (History tab). Returns false when it was not there.
+    @discardableResult
+    public func remove(id: UUID) -> Bool {
+        lock.lock()
+        let before = cache.count
+        cache.removeAll { $0.id == id }
+        let changed = cache.count != before
+        let snapshot = cache
+        lock.unlock()
+        if changed { save(snapshot) }
+        return changed
+    }
+
     public func clear() {
         lock.lock()
         cache.removeAll()
