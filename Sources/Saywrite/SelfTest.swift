@@ -105,6 +105,7 @@ enum OverlaySnapshot {
             ("done", .done(ChangeSummary(punctuationChanged: 1, wordsChanged: 5, usedLLM: true).text, undo: true), "I'd like to buy a new bike.", ""),
             ("notice", .notice("No text field – copied, press ⌘V", symbol: "doc.on.clipboard"), "", ""),
             ("notice-app", .notice("Other app in front – copied, press ⌘V", symbol: "macwindow.on.rectangle"), "", ""),
+            ("notice-cancelled", .notice("Cancelled – nothing inserted", symbol: "xmark.circle"), "", ""),
             ("auto-stopped", .autoStopped("Stopped automatically"), "", ""),
             ("error", .error("No microphone access"), "", ""),
             ("error-action", .error("No microphone access"), "", ""),
