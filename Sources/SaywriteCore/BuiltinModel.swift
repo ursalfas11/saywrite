@@ -60,7 +60,12 @@ public enum BuiltinModelState: Sendable, Equatable {
 /// The chat format of the Qwen2.5 models (ChatML), the same as the template Ollama applies.
 public enum ChatTemplate {
     public static func qwen(system: String, user: String) -> String {
-        "<|im_start|>system\n\(plain(system))<|im_end|>\n<|im_start|>user\n\(plain(user))<|im_end|>\n<|im_start|>assistant\n"
+        prefix(system: system) + "\(plain(user))<|im_end|>\n<|im_start|>assistant\n"
+    }
+
+    /// The part of the prompt that only depends on the system prompt.
+    public static func prefix(system: String) -> String {
+        "<|im_start|>system\n\(plain(system))<|im_end|>\n<|im_start|>user\n"
     }
 
     /// The engine tokenizes the whole string with control tokens enabled, so a literal `<|im_end|>` in a
@@ -84,6 +89,49 @@ public enum KVCachePlan {
         while keep < min(cached.count, tokens.count), cached[keep] == tokens[keep] { keep += 1 }
         if keep == tokens.count { keep -= 1 }
         return max(0, keep)
+    }
+}
+
+/// Saved cache states of prompt prefixes (the constant system prompts). The context holds one prompt at
+/// a time; switching between German and English or from a cleanup to a rewrite would decode the other
+/// system prompt again (450–750 ms). Restoring its saved state takes milliseconds.
+public struct PrefixSnapshots<State> {
+    public let capacity: Int
+    /// Least recently used first.
+    private var entries: [(tokens: [Int32], state: State)] = []
+
+    public init(capacity: Int) {
+        self.capacity = capacity
+    }
+
+    public var count: Int { entries.count }
+
+    public func contains(_ tokens: [Int32]) -> Bool {
+        entries.contains { $0.tokens == tokens }
+    }
+
+    /// Saves `state` for `tokens`, replacing an older state of the same prefix and dropping the least
+    /// recently used one beyond `capacity`.
+    public mutating func store(_ tokens: [Int32], _ state: State) {
+        entries.removeAll { $0.tokens == tokens }
+        entries.append((tokens, state))
+        if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
+    }
+
+    /// The longest saved prefix of `tokens` that is worth restoring: longer than the `keep` tokens the
+    /// cache shares with them already, and shorter than `tokens` (the last token must be decoded for logits).
+    public mutating func restorable(for tokens: [Int32], keep: Int) -> (tokens: [Int32], state: State)? {
+        guard let index = entries.indices
+            .filter({ entries[$0].tokens.count > keep && entries[$0].tokens.count < tokens.count && tokens.starts(with: entries[$0].tokens) })
+            .max(by: { entries[$0].tokens.count < entries[$1].tokens.count })
+        else { return nil }
+        let entry = entries.remove(at: index)
+        entries.append(entry)
+        return entry
+    }
+
+    public mutating func removeAll() {
+        entries.removeAll()
     }
 }
 

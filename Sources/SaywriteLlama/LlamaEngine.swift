@@ -35,6 +35,9 @@ public actor LlamaEngine {
     /// Tokens whose keys and values are in the context, so a request that starts with the same
     /// (long, constant) system prompt does not decode it again.
     private var cachedTokens: [llama_token] = []
+    /// The cache states of the system prompts used so far (cleanup and rewrite, German and English), so
+    /// switching between them restores the prompt instead of decoding it again.
+    private var snapshots = PrefixSnapshots<[UInt8]>(capacity: 4)
     private var lastUse = Date()
     private let abortBox = AbortBox()
     private let loaded = LockedFlag()
@@ -91,6 +94,7 @@ public actor LlamaEngine {
         self.vocab = llama_model_get_vocab(model)
         self.loadedPath = url.path
         self.cachedTokens = []
+        self.snapshots.removeAll()
         self.lastUse = Date()
         loaded.value = true
         startWatching()
@@ -125,6 +129,7 @@ public actor LlamaEngine {
         vocab = nil
         loadedPath = nil
         cachedTokens = []
+        snapshots.removeAll()
         loaded.value = false
         idleTimer?.cancel()
         idleTimer = nil
@@ -222,17 +227,34 @@ public actor LlamaEngine {
         if keep > 0, !llama_memory_seq_rm(memory, 0, Int32(keep), -1) { keep = 0 }
         if keep == 0 { llama_memory_clear(memory, true) }
         cachedTokens = []
+        // Another system prompt than the one in the cache: restore its saved state if there is one.
+        if let saved = snapshots.restorable(for: tokens, keep: keep) {
+            llama_memory_clear(memory, true)
+            let read = saved.state.withUnsafeBufferPointer { llama_state_seq_set_data(context, $0.baseAddress, $0.count, 0) }
+            if read > 0 {
+                keep = saved.tokens.count
+            } else {
+                llama_memory_clear(memory, true)
+                keep = 0
+            }
+        }
+        // The system prompt's part of the prompt, to save once it is decoded.
+        let prefix = (try? tokenize(ChatTemplate.prefix(system: system), vocab: vocab)).flatMap { prefix in
+            tokens.starts(with: prefix) && keep < prefix.count && !snapshots.contains(prefix) ? prefix : nil
+        }
 
         do {
             // The prompt, in batches.
             var position = keep
             while position < tokens.count {
-                let end = min(tokens.count, position + Int(Self.batchSize))
+                var end = min(tokens.count, position + Int(Self.batchSize))
+                if let prefix, position < prefix.count { end = min(end, prefix.count) }
                 var chunk = Array(tokens[position..<end])
                 let status = chunk.withUnsafeMutableBufferPointer { llama_decode(context, llama_batch_get_one($0.baseAddress, Int32($0.count))) }
                 if status != 0 { throw decodeFailure(abort) }
                 if abort.isSet || Task.isCancelled { throw LLMError.timeout }
                 position = end
+                if let prefix, position == prefix.count { saveSnapshot(of: prefix, context: context) }
             }
             cachedTokens = tokens
 
@@ -352,6 +374,15 @@ public actor LlamaEngine {
         var index: vDSP_Length = 0
         vDSP_maxvi(logits, 1, &value, &index, vDSP_Length(count))
         return llama_token(index)
+    }
+
+    /// Saves the cache state of sequence 0, which holds exactly `prefix` right now.
+    private func saveSnapshot(of prefix: [llama_token], context: OpaquePointer) {
+        let size = llama_state_seq_get_size(context, 0)
+        guard size > 0 else { return }
+        var state = [UInt8](repeating: 0, count: size)
+        let written = state.withUnsafeMutableBufferPointer { llama_state_seq_get_data(context, $0.baseAddress, size, 0) }
+        if written == size { snapshots.store(prefix, state) }
     }
 
     private func decodeFailure(_ abort: AbortFlag) -> LLMError {

@@ -59,6 +59,48 @@ final class EngineSpeedupTests: XCTestCase {
         XCTAssertEqual(result.next, 99)
     }
 
+    // MARK: Saved prompt prefixes
+
+    func testPrefixIsTheStartOfThePrompt() {
+        let prompt = ChatTemplate.qwen(system: "System", user: "Text")
+        XCTAssertTrue(prompt.hasPrefix(ChatTemplate.prefix(system: "System")))
+        XCTAssertEqual(prompt, ChatTemplate.prefix(system: "System") + "Text<|im_end|>\n<|im_start|>assistant\n")
+    }
+
+    func testRestoresTheLongestSavedPrefixWorthIt() {
+        var snapshots = PrefixSnapshots<String>(capacity: 4)
+        snapshots.store([1, 2], "short")
+        snapshots.store([1, 2, 3, 4], "long")
+        snapshots.store([7, 8, 9], "other")
+        XCTAssertEqual(snapshots.restorable(for: [1, 2, 3, 4, 5, 6], keep: 0)?.state, "long")
+        // The cache already shares more than any saved prefix: nothing to restore.
+        XCTAssertNil(snapshots.restorable(for: [1, 2, 3, 4, 5, 6], keep: 4))
+        XCTAssertEqual(snapshots.restorable(for: [1, 2, 9, 9], keep: 1)?.state, "short")
+        XCTAssertEqual(snapshots.restorable(for: [7, 8, 9, 1], keep: 0)?.state, "other")
+        // A prefix as long as the whole prompt leaves no token to decode for the logits.
+        XCTAssertNil(snapshots.restorable(for: [7, 8, 9], keep: 0))
+        XCTAssertNil(snapshots.restorable(for: [5, 6, 7], keep: 0))
+    }
+
+    func testSnapshotsDropTheLeastRecentlyUsed() {
+        var snapshots = PrefixSnapshots<Int>(capacity: 2)
+        snapshots.store([1], 1)
+        snapshots.store([2], 2)
+        // Using [1] makes [2] the oldest.
+        XCTAssertEqual(snapshots.restorable(for: [1, 0], keep: 0)?.state, 1)
+        snapshots.store([3], 3)
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertTrue(snapshots.contains([1]))
+        XCTAssertFalse(snapshots.contains([2]))
+        XCTAssertTrue(snapshots.contains([3]))
+        // Storing the same prefix again replaces it.
+        snapshots.store([3], 30)
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots.restorable(for: [3, 0], keep: 0)?.state, 30)
+        snapshots.removeAll()
+        XCTAssertEqual(snapshots.count, 0)
+    }
+
     // MARK: Early word check
 
     func testWordGuardAllowsPunctuationAndCapitalization() {
