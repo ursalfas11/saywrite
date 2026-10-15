@@ -282,7 +282,7 @@ public actor DictationSession {
 
         let raw = Self.join(spoken.map(\.raw))
         let plain = RuleCleaner.finalize(Self.join(units), style: style, language: language)
-        guard !plain.isEmpty else { return nil }
+        guard !plain.isEmpty, !Self.onlyFillers(raw) else { return nil }
         let (final, replacementCount) = ReplacementEngine.apply(replacements, to: plain)
 
         let summary = ChangeSummarizer.summarize(
@@ -376,6 +376,14 @@ public actor DictationSession {
               let first = raw.split(whereSeparator: { $0.isWhitespace }).first,
               first.first?.isLowercase == true, !RuleCleaner.isBrandToken(first) else { return false }
         return true
+    }
+
+    /// "Um." or "Ähm, äh." alone: a hesitation the recognizer wrote down, nothing to insert (not even the
+    /// period left over). Checked on what was said, since the rules remove only the fillers of one
+    /// language and the language of two letters is a guess.
+    static func onlyFillers(_ text: String) -> Bool {
+        let words = LLMOutputGuard.words(text)
+        return !words.isEmpty && words.allSatisfy(RuleCleaner.fillerWords.contains)
     }
 
     static func dropFalsePeriod(_ text: String) -> String {
