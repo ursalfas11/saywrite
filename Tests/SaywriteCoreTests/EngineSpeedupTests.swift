@@ -109,6 +109,17 @@ final class EngineSpeedupTests: XCTestCase {
         XCTAssertNil(EngineTuning.residencyKeepAlive(physicalMemory: 16 << 30))
     }
 
+    // MARK: Ollama context
+
+    func testOllamaContextEstimateUsesThreeCharactersPerToken() {
+        // ~1700 prompt tokens and an answer as long fit the default 4096; at two characters per token it
+        // asked for 8192, which makes Ollama load the model again.
+        XCTAssertEqual(OllamaClient.contextSize(promptCharacters: 5_000, maxTokens: 2_564), 4096)
+        XCTAssertEqual(OllamaClient.contextSize(promptCharacters: 7_000, maxTokens: 2_564), 8192)
+        XCTAssertEqual(OllamaClient.contextSize(promptCharacters: 2_400, maxTokens: 900), 4096)
+        XCTAssertNil(OllamaClient.contextSize(promptCharacters: 60_000, maxTokens: 60_000))
+    }
+
     // MARK: Early word check
 
     func testWordGuardAllowsPunctuationAndCapitalization() {
