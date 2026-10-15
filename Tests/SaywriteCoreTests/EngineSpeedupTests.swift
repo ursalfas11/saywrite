@@ -58,4 +58,86 @@ final class EngineSpeedupTests: XCTestCase {
         XCTAssertEqual(result.accepted, 1)
         XCTAssertEqual(result.next, 99)
     }
+
+    // MARK: Early word check
+
+    func testWordGuardAllowsPunctuationAndCapitalization() {
+        let guardian = WordPrefixGuard(input: "ich komme morgen um drei uhr")
+        XCTAssertTrue(guardian.allows(""))
+        XCTAssertTrue(guardian.allows("Ich"))
+        XCTAssertTrue(guardian.allows("Ich ko"))
+        XCTAssertTrue(guardian.allows("Ich komme morgen, um"))
+        XCTAssertTrue(guardian.allows("Ich komme morgen um drei Uhr."))
+    }
+
+    func testWordGuardStopsChangedMissingOrExtraWords() {
+        let guardian = WordPrefixGuard(input: "ich komme morgen um drei uhr")
+        XCTAssertFalse(guardian.allows("Ich kam "))
+        XCTAssertFalse(guardian.allows("Ich komme um"))
+        XCTAssertFalse(guardian.allows("Ich komme morgen um 3"))
+        XCTAssertFalse(guardian.allows("Ich komme morgen um drei Uhr. Gerne"))
+        // An unfinished word that cannot become the next input word.
+        XCTAssertFalse(guardian.allows("Ich kx"))
+    }
+
+    func testWordGuardIgnoresWhatSanitizeRemoves() {
+        let guardian = WordPrefixGuard(input: "das ist gut")
+        XCTAssertTrue(guardian.allows("<diktat>\nDas ist"))
+        XCTAssertTrue(guardian.allows("-> Das ist gut"))
+        XCTAssertTrue(guardian.allows("„Das ist gut.“"))
+        XCTAssertTrue(guardian.allows("Das ist gut.\n</dik"))
+        XCTAssertTrue(guardian.allows("Das ist gut.\n</diktat>"))
+    }
+
+    func testWordGuardIsNeverStricterThanSameWords() {
+        let pairs = [
+            ("das kostet 5 € pro stück", "Das kostet 5 € pro Stück."),
+            ("treffen wir uns um 10:30", "Treffen wir uns um 10:30?"),
+            ("die e-mail an herrn müller", "Die E-Mail an Herrn Müller."),
+            ("we'll meet at the café", "We'll meet at the café."),
+        ]
+        for (input, output) in pairs {
+            XCTAssertTrue(LLMOutputGuard.sameWords(input, output))
+            let guardian = WordPrefixGuard(input: input)
+            // Every prefix of an accepted answer passes, character by character.
+            var partial = ""
+            for character in output {
+                partial.append(character)
+                XCTAssertTrue(guardian.allows(partial), "\(input) -> \(partial)")
+            }
+        }
+    }
+
+    func testSessionAsksForKeptWordsOnlyWithoutACorrection() async {
+        let llm = WordFlagLLM()
+        let plain = DictationSession(
+            // More than 25 words without punctuation: the model adds the commas.
+            transcriber: FakeTranscriber(texts: [1: "ich wollte Ihnen nur kurz mitteilen dass wir die Unterlagen wie vereinbart bis Ende der Woche prüfen werden und die Antwort dann direkt im Anschluss an Sie per Post senden"]),
+            llm: llm, style: .formal, appBundleID: nil)
+        await plain.addSegment([1])
+        _ = await plain.finish()
+        let corrected = DictationSession(
+            transcriber: FakeTranscriber(texts: [1: "Wir treffen uns um drei, nein, um vier."]), llm: llm, style: .neutral, appBundleID: nil)
+        await corrected.addSegment([1])
+        _ = await corrected.finish()
+        let flags = await llm.log.flags
+        XCTAssertEqual(flags, [true, false])
+    }
+}
+
+actor FlagLog {
+    var flags: [Bool] = []
+    func record(_ flag: Bool) { flags.append(flag) }
+}
+
+/// Records whether the session asked for an answer with the input's words.
+struct WordFlagLLM: LLMClient {
+    let log = FlagLog()
+    func prewarm(forRewrite: Bool) async {}
+    func cleanup(text: String, style: Style, language: DictationLanguage) async throws -> String { text }
+    func cleanup(text: String, style: Style, language: DictationLanguage, keepingWords: Bool) async throws -> String {
+        await log.record(keepingWords)
+        return text
+    }
+    func rewrite(selection: String, instruction: String) async throws -> String { selection }
 }

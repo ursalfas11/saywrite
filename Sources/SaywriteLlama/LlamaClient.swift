@@ -22,8 +22,13 @@ public struct LlamaClient: LLMClient {
     }
 
     public func cleanup(text: String, style: Style, language: DictationLanguage = .german) async throws -> String {
-        try await LLMRequests.cleanup(text: text, style: style, language: language) { system, user, maxTokens in
-            try await generate(system: system, user: user, maxTokens: maxTokens, timeout: cleanupTimeout, decoding: .copy(source: text))
+        try await cleanup(text: text, style: style, language: language, keepingWords: false)
+    }
+
+    public func cleanup(text: String, style: Style, language: DictationLanguage, keepingWords: Bool) async throws -> String {
+        let decoding = LlamaEngine.Decoding.copy(source: text, wordGuard: keepingWords ? WordPrefixGuard(input: text) : nil)
+        return try await LLMRequests.cleanup(text: text, style: style, language: language) { system, user, maxTokens in
+            try await generate(system: system, user: user, maxTokens: maxTokens, timeout: cleanupTimeout, decoding: decoding)
         }
     }
 

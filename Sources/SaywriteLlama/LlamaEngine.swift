@@ -193,8 +193,8 @@ public actor LlamaEngine {
         /// Sampling (`Sampling`): a rewrite is new text.
         case sample
         /// Greedy, with prompt lookup against `source` (`PromptLookup`): a cleanup answer is nearly a copy
-        /// of the dictation.
-        case copy(source: String)
+        /// of the dictation. `wordGuard` stops an answer that leaves the source's words (`LLMError.rejectedOutput`).
+        case copy(source: String, wordGuard: WordPrefixGuard? = nil)
     }
 
     /// Answers one chat request. Throws `LLMError.timeout` when `abort` is set or the task is cancelled.
@@ -240,9 +240,10 @@ public actor LlamaEngine {
             switch decoding {
             case .sample:
                 answer = try sampleAnswer(context: context, vocab: vocab, budget: budget, abort: abort)
-            case .copy(let source):
+            case .copy(let source, let wordGuard):
                 let sourceTokens = (try? tokenize(source, vocab: vocab, special: false)) ?? []
-                answer = try copyAnswer(context: context, vocab: vocab, past: tokens.count, source: sourceTokens, budget: budget, abort: abort)
+                answer = try copyAnswer(
+                    context: context, vocab: vocab, past: tokens.count, source: sourceTokens, budget: budget, abort: abort, wordGuard: wordGuard)
             }
             // An answer cut off by the token or context limit must not replace a selection (the catch clears the cache).
             // Cut off because the context was full (not because the answer ran past its own budget): the selection is too long.
@@ -250,12 +251,19 @@ public actor LlamaEngine {
             // Keep the prompt, drop the answer.
             _ = llama_memory_seq_rm(memory, 0, Int32(tokens.count), -1)
             return String(decoding: answer.bytes, as: UTF8.self)
+        } catch is LeftTheWords {
+            // Stopped between two decodes: the cache is consistent, only the answer goes.
+            _ = llama_memory_seq_rm(memory, 0, Int32(tokens.count), -1)
+            throw LLMError.rejectedOutput
         } catch {
             llama_memory_clear(memory, true)
             cachedTokens = []
             throw error
         }
     }
+
+    /// The answer left the input's words (`WordPrefixGuard`).
+    private struct LeftTheWords: Error {}
 
     private struct Answer {
         var bytes: [UInt8] = []
@@ -285,7 +293,8 @@ public actor LlamaEngine {
     /// guessed tokens the model confirms are kept; the cache is cut back after the first one it does not.
     /// `past` is the number of tokens in the cache (the prompt); its last logits give the first token.
     private func copyAnswer(
-        context: OpaquePointer, vocab: OpaquePointer, past start: Int, source: [llama_token], budget: Int, abort: AbortFlag
+        context: OpaquePointer, vocab: OpaquePointer, past start: Int, source: [llama_token], budget: Int, abort: AbortFlag,
+        wordGuard: WordPrefixGuard?
     ) throws -> Answer {
         let memory = llama_get_memory(context)
         let vocabSize = Int(llama_vocab_n_tokens(vocab))
@@ -324,6 +333,7 @@ public actor LlamaEngine {
                 append(token, to: &answer.bytes, vocab: vocab, piece: &piece)
             }
             past += 1 + accepted
+            if let wordGuard, !wordGuard.allows(String(decoding: answer.bytes, as: UTF8.self)) { throw LeftTheWords() }
             // The rejected guesses are not part of the answer.
             if accepted < draft.count, !llama_memory_seq_rm(memory, 0, llama_pos(past), -1) { throw LLMError.badResponse }
             pending = next
