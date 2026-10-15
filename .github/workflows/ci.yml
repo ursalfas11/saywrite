@@ -30,6 +30,12 @@ jobs:
           otool -L build/Saywrite.app/Contents/MacOS/Saywrite | grep llama.framework
           # Starting the binary makes dyld resolve every framework; this mode renders PNGs and exits. The model is never downloaded in CI.
           build/Saywrite.app/Contents/MacOS/Saywrite --render-overlay "$RUNNER_TEMP/overlay"
+      - name: Upload the rendered recorder pill states
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-states
+          path: ${{ runner.temp }}/overlay/*.png
+          retention-days: 30
       - name: Pack the app
         # ditto keeps the bundle's permissions and signature; upload-artifact alone would drop the executable bit.
         run: ditto -c -k --keepParent build/Saywrite.app build/Saywrite.zip
