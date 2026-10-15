@@ -52,6 +52,8 @@ final class AppSettings: ObservableObject {
     /// Keep recent dictations in a file on this Mac (for "Paste last" and the History tab).
     @Published var keepHistory: Bool { didSet { defaults.set(keepHistory, forKey: "keepHistory") } }
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: "playSounds") } }
+    /// Ask GitHub once a day whether a newer release exists. Off: no network request for it at all.
+    @Published var checkForUpdates: Bool { didSet { defaults.set(checkForUpdates, forKey: "checkForUpdates") } }
     @Published var replacements: [Replacement] {
         didSet { defaults.set(try? JSONEncoder().encode(replacements), forKey: "replacements") }
     }
@@ -84,6 +86,7 @@ final class AppSettings: ObservableObject {
         inputDeviceName = defaults.string(forKey: "inputDeviceName") ?? ""
         keepHistory = defaults.object(forKey: "keepHistory") as? Bool ?? true
         playSounds = defaults.object(forKey: "playSounds") as? Bool ?? true
+        checkForUpdates = defaults.object(forKey: "checkForUpdates") as? Bool ?? true
         if let data = defaults.data(forKey: "replacements"), let list = try? JSONDecoder().decode([Replacement].self, from: data) {
             replacements = list
         } else {
