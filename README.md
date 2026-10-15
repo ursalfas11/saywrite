@@ -177,11 +177,12 @@ Everything else is in the menu bar icon → **Settings**: keys, microphone, lang
 
 ```bash
 make test                   # unit tests for the text pipeline
-make eval                   # quality evaluation with the real local LLM (built-in model if downloaded, else Ollama) (German and English set)
+make eval                   # quality evaluation with the real local LLM (built-in model if downloaded, else Ollama) (German, English and real-dictation sets)
 make eval-rules             # rules-only eval against the thresholds in Tests/Eval/rules-baseline.txt (what CI runs)
 swift run -c release SaywriteEval Tests/Eval/cases.json --backend ollama --model qwen2.5:7b --report Tests/Eval/results.jsonl
 swift run -c release SaywriteEval Tests/Eval/cases.json --backend llama   # the built-in model (default when its file is downloaded)
 swift run -c release SaywriteEval Tests/Eval/cases-en.json   # English set
+swift run -c release SaywriteEval Tests/Eval/cases-real.json   # patterns from real dictations (rebuilt), German and English
 make run                    # build the .app and launch it
 scripts/bench.sh            # latency benchmark with the real models, no microphone needed
 ```

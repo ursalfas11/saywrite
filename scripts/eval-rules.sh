@@ -1,6 +1,6 @@
 #!/bin/bash
-# Rules-only regression gate: runs both eval sets with --no-ai (no Ollama needed) and fails when a set
-# passes fewer cases than Tests/Eval/rules-baseline.txt says.
+# Rules-only regression gate: runs every eval set listed in Tests/Eval/rules-baseline.txt with --no-ai
+# (no model needed) and fails when a set passes fewer cases than the minimum given there.
 set -u
 cd "$(dirname "$0")/.."
 status=0

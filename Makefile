@@ -53,6 +53,7 @@ test:
 eval:
 	swift run -c release SaywriteEval Tests/Eval/cases.json $(EVAL_ARGS)
 	swift run -c release SaywriteEval Tests/Eval/cases-en.json $(EVAL_ARGS)
+	swift run -c release SaywriteEval Tests/Eval/cases-real.json $(EVAL_ARGS)
 
 # Rules only, no LLM; fails when a set drops below Tests/Eval/rules-baseline.txt.
 eval-rules:
