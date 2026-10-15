@@ -22,18 +22,25 @@ public struct LlamaClient: LLMClient {
     }
 
     public func cleanup(text: String, style: Style, language: DictationLanguage = .german) async throws -> String {
-        try await LLMRequests.cleanup(text: text, style: style, language: language) { system, user, maxTokens in
-            try await generate(system: system, user: user, maxTokens: maxTokens, timeout: cleanupTimeout)
+        try await cleanup(text: text, style: style, language: language, keepingWords: false)
+    }
+
+    public func cleanup(text: String, style: Style, language: DictationLanguage, keepingWords: Bool) async throws -> String {
+        let decoding = LlamaEngine.Decoding.copy(source: text, wordGuard: keepingWords ? WordPrefixGuard(input: text) : nil)
+        return try await LLMRequests.cleanup(text: text, style: style, language: language) { system, user, maxTokens in
+            try await generate(system: system, user: user, maxTokens: maxTokens, timeout: cleanupTimeout, decoding: decoding)
         }
     }
 
     public func rewrite(selection: String, instruction: String) async throws -> String {
         try await LLMRequests.rewrite(selection: selection, instruction: instruction) { system, user, maxTokens in
-            try await generate(system: system, user: user, maxTokens: maxTokens, timeout: rewriteTimeout)
+            try await generate(system: system, user: user, maxTokens: maxTokens, timeout: rewriteTimeout, decoding: .sample)
         }
     }
 
-    private func generate(system: String, user: String, maxTokens: Int, timeout: TimeInterval) async throws -> String {
+    private func generate(
+        system: String, user: String, maxTokens: Int, timeout: TimeInterval, decoding: LlamaEngine.Decoding
+    ) async throws -> String {
         guard FileManager.default.fileExists(atPath: modelURL.path) else { throw LLMError.unreachable }
         let engine = LlamaEngine.shared
         let started = Date()
@@ -48,7 +55,7 @@ public struct LlamaClient: LLMClient {
         let abort = AbortFlag()
         return try await withTimeout(seconds: remaining) {
             try await withTaskCancellationHandler {
-                try await engine.generate(system: system, user: user, maxTokens: maxTokens, abort: abort)
+                try await engine.generate(system: system, user: user, maxTokens: maxTokens, abort: abort, decoding: decoding)
             } onCancel: {
                 abort.set()
             }

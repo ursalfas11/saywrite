@@ -150,6 +150,9 @@ final class DictationController {
         Task { await loadModels() }
         refreshBuiltinState()
         if settings.llmBackend == .ollama { Task { await refreshOllamaStatus() } }
+        // After an app or macOS update llama.cpp compiles its Metal kernels again (5–7 s): now, not in the first dictation.
+        LlamaEngine.shared.prewarmAfterUpdate(
+            modelURL: modelStore.fileURL(modelSpec), language: prewarmLanguage, enabled: settings.aiEnabled && settings.llmBackend == .builtin)
     }
 
     private func loadModels() async {
