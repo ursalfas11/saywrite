@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import SaywriteCore
 import llama
@@ -12,8 +13,9 @@ public actor LlamaEngine {
     /// Same as Ollama's keep_alive.
     public static let idleSeconds: TimeInterval = 15 * 60
 
-    /// Sampling like the options Ollama applies to qwen2.5 (temperature 0.1 from OllamaClient, its
-    /// defaults for the rest), with a fixed seed so a run is repeatable.
+    /// Sampling for rewrites, like the options Ollama applies to qwen2.5 (temperature 0.1 from
+    /// OllamaClient, its defaults for the rest), with a fixed seed so a run is repeatable. Cleanup is
+    /// greedy (`Decoding.copy`), which prompt lookup needs to keep the answer unchanged.
     enum Sampling {
         static let temperature: Float = 0.1
         static let topK: Int32 = 40
@@ -186,10 +188,21 @@ public actor LlamaEngine {
 
     // MARK: - Generation
 
+    /// How the answer is decoded.
+    public enum Decoding: Sendable {
+        /// Sampling (`Sampling`): a rewrite is new text.
+        case sample
+        /// Greedy, with prompt lookup against `source` (`PromptLookup`): a cleanup answer is nearly a copy
+        /// of the dictation.
+        case copy(source: String)
+    }
+
     /// Answers one chat request. Throws `LLMError.timeout` when `abort` is set or the task is cancelled.
     /// `requireFinished: false` is for the prewarm only: it wants the decoded prompt in the cache and
     /// throws the one sampled token away, so a cut-off answer is not an error there.
-    public func generate(system: String, user: String, maxTokens: Int, abort: AbortFlag, requireFinished: Bool = true) throws -> String {
+    public func generate(
+        system: String, user: String, maxTokens: Int, abort: AbortFlag, requireFinished: Bool = true, decoding: Decoding = .sample
+    ) throws -> String {
         guard let context, let vocab else { throw LLMError.unreachable }
         if abort.isSet || Task.isCancelled { throw LLMError.timeout }
         abortBox.flag = abort
@@ -223,26 +236,20 @@ public actor LlamaEngine {
             }
             cachedTokens = tokens
 
-            let sampler = makeSampler(vocab: vocab)
-            defer { llama_sampler_free(sampler) }
-            var bytes: [UInt8] = []
-            var piece = [CChar](repeating: 0, count: 128)
-            var finished = false
-            for _ in 0..<budget {
-                if abort.isSet || Task.isCancelled { throw LLMError.timeout }
-                var token = llama_sampler_sample(sampler, context, -1)
-                if llama_vocab_is_eog(vocab, token) { finished = true; break }
-                let length = Int(llama_token_to_piece(vocab, token, &piece, Int32(piece.count), 0, false))
-                if length > 0 { bytes.append(contentsOf: piece[0..<length].map { UInt8(bitPattern: $0) }) }
-                let status = llama_decode(context, llama_batch_get_one(&token, 1))
-                if status != 0 { throw decodeFailure(abort) }
+            let answer: Answer
+            switch decoding {
+            case .sample:
+                answer = try sampleAnswer(context: context, vocab: vocab, budget: budget, abort: abort)
+            case .copy(let source):
+                let sourceTokens = (try? tokenize(source, vocab: vocab, special: false)) ?? []
+                answer = try copyAnswer(context: context, vocab: vocab, past: tokens.count, source: sourceTokens, budget: budget, abort: abort)
             }
             // An answer cut off by the token or context limit must not replace a selection (the catch clears the cache).
             // Cut off because the context was full (not because the answer ran past its own budget): the selection is too long.
-            guard finished || !requireFinished else { throw budget < maxTokens ? LLMError.tooLong : LLMError.rejectedOutput }
+            guard answer.finished || !requireFinished else { throw budget < maxTokens ? LLMError.tooLong : LLMError.rejectedOutput }
             // Keep the prompt, drop the answer.
             _ = llama_memory_seq_rm(memory, 0, Int32(tokens.count), -1)
-            return String(decoding: bytes, as: UTF8.self)
+            return String(decoding: answer.bytes, as: UTF8.self)
         } catch {
             llama_memory_clear(memory, true)
             cachedTokens = []
@@ -250,17 +257,105 @@ public actor LlamaEngine {
         }
     }
 
+    private struct Answer {
+        var bytes: [UInt8] = []
+        /// The model ended the answer itself (not cut off by the budget).
+        var finished = false
+    }
+
+    /// One sampled token per decode.
+    private func sampleAnswer(context: OpaquePointer, vocab: OpaquePointer, budget: Int, abort: AbortFlag) throws -> Answer {
+        let sampler = makeSampler(vocab: vocab)
+        defer { llama_sampler_free(sampler) }
+        var answer = Answer()
+        var piece = [CChar](repeating: 0, count: 128)
+        for _ in 0..<budget {
+            if abort.isSet || Task.isCancelled { throw LLMError.timeout }
+            var token = llama_sampler_sample(sampler, context, -1)
+            if llama_vocab_is_eog(vocab, token) { answer.finished = true; break }
+            append(token, to: &answer.bytes, vocab: vocab, piece: &piece)
+            let status = llama_decode(context, llama_batch_get_one(&token, 1))
+            if status != 0 { throw decodeFailure(abort) }
+        }
+        return answer
+    }
+
+    /// Greedy decoding with prompt lookup: each decode checks the pending token plus up to
+    /// `PromptLookup.draftLength` tokens guessed from `source`, with logits for every position. The
+    /// guessed tokens the model confirms are kept; the cache is cut back after the first one it does not.
+    /// `past` is the number of tokens in the cache (the prompt); its last logits give the first token.
+    private func copyAnswer(
+        context: OpaquePointer, vocab: OpaquePointer, past start: Int, source: [llama_token], budget: Int, abort: AbortFlag
+    ) throws -> Answer {
+        let memory = llama_get_memory(context)
+        let vocabSize = Int(llama_vocab_n_tokens(vocab))
+        var batch = llama_batch_init(Int32(PromptLookup.draftLength + 1), 0, 1)
+        defer { llama_batch_free(batch) }
+        var answer = Answer()
+        var generated: [llama_token] = []
+        var piece = [CChar](repeating: 0, count: 128)
+        var past = start
+        var pending = Self.argmax(llama_get_logits_ith(context, -1), count: vocabSize)
+        while true {
+            if abort.isSet || Task.isCancelled { throw LLMError.timeout }
+            // Same limit as one token per decode: the token at index `budget` would not have been sampled.
+            guard generated.count < budget else { break }
+            if llama_vocab_is_eog(vocab, pending) { answer.finished = true; break }
+            generated.append(pending)
+            append(pending, to: &answer.bytes, vocab: vocab, piece: &piece)
+            guard generated.count < budget else { break }
+
+            let draft = PromptLookup.draft(generated: generated, source: source, limit: min(PromptLookup.draftLength, budget - generated.count))
+            batch.n_tokens = Int32(draft.count + 1)
+            for (index, token) in ([pending] + draft).enumerated() {
+                batch.token[index] = token
+                batch.pos[index] = llama_pos(past + index)
+                batch.n_seq_id[index] = 1
+                batch.seq_id[index]![0] = 0
+                batch.logits[index] = 1
+            }
+            let status = llama_decode(context, batch)
+            if status != 0 { throw decodeFailure(abort) }
+            let (accepted, next) = PromptLookup.accept(draft: draft, isEnd: { llama_vocab_is_eog(vocab, $0) }) { index in
+                Self.argmax(llama_get_logits_ith(context, Int32(index)), count: vocabSize)
+            }
+            for token in draft.prefix(accepted) {
+                generated.append(token)
+                append(token, to: &answer.bytes, vocab: vocab, piece: &piece)
+            }
+            past += 1 + accepted
+            // The rejected guesses are not part of the answer.
+            if accepted < draft.count, !llama_memory_seq_rm(memory, 0, llama_pos(past), -1) { throw LLMError.badResponse }
+            pending = next
+        }
+        return answer
+    }
+
+    private func append(_ token: llama_token, to bytes: inout [UInt8], vocab: OpaquePointer, piece: inout [CChar]) {
+        let length = Int(llama_token_to_piece(vocab, token, &piece, Int32(piece.count), 0, false))
+        if length > 0 { bytes.append(contentsOf: piece[0..<length].map { UInt8(bitPattern: $0) }) }
+    }
+
+    private static func argmax(_ logits: UnsafeMutablePointer<Float>?, count: Int) -> llama_token {
+        guard let logits else { return 0 }
+        var value: Float = 0
+        var index: vDSP_Length = 0
+        vDSP_maxvi(logits, 1, &value, &index, vDSP_Length(count))
+        return llama_token(index)
+    }
+
     private func decodeFailure(_ abort: AbortFlag) -> LLMError {
         abort.isSet || Task.isCancelled ? .timeout : .badResponse
     }
 
-    private func tokenize(_ text: String, vocab: OpaquePointer) throws -> [llama_token] {
+    /// `special: false` reads control tokens as plain text (for the dictation alone).
+    private func tokenize(_ text: String, vocab: OpaquePointer, special: Bool = true) throws -> [llama_token] {
         let utf8Count = Int32(text.utf8.count)
         var tokens = [llama_token](repeating: 0, count: Int(utf8Count) + 16)
-        var count = llama_tokenize(vocab, text, utf8Count, &tokens, Int32(tokens.count), false, true)
+        var count = llama_tokenize(vocab, text, utf8Count, &tokens, Int32(tokens.count), false, special)
         if count < 0 {
             tokens = [llama_token](repeating: 0, count: Int(-count))
-            count = llama_tokenize(vocab, text, utf8Count, &tokens, Int32(tokens.count), false, true)
+            count = llama_tokenize(vocab, text, utf8Count, &tokens, Int32(tokens.count), false, special)
         }
         guard count > 0 else { throw LLMError.badResponse }
         return Array(tokens[0..<Int(count)])
