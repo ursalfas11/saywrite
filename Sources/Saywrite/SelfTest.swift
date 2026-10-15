@@ -98,10 +98,17 @@ enum OverlaySnapshot {
         try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         let states: [(String, OverlayState, String, String)] = [
             ("recording", .recording(handsFree: true, rewrite: false), "", ""),
+            ("recording-hold", .recording(handsFree: false, rewrite: false), "", ""),
+            ("recording-countdown", .recording(handsFree: true, rewrite: false), "", ""),
             ("rewrite", .recording(handsFree: true, rewrite: true), "", ""),
             ("processing", .processing, "I'd like to buy a new bike. Ideally one with lights.", ""),
             ("done", .done(ChangeSummary(punctuationChanged: 1, wordsChanged: 5, usedLLM: true).text, undo: true), "I'd like to buy a new bike.", ""),
+            ("notice", .notice("No text field – copied, press ⌘V", symbol: "doc.on.clipboard"), "", ""),
+            ("notice-app", .notice("Other app in front – copied, press ⌘V", symbol: "macwindow.on.rectangle"), "", ""),
+            ("auto-stopped", .autoStopped("Stopped automatically"), "", ""),
             ("error", .error("No microphone access"), "", ""),
+            ("error-action", .error("No microphone access"), "", ""),
+            ("high-contrast", .notice("Nothing heard – try again", symbol: "ear"), "", ""),
         ]
         for (name, state, committed, partial) in states {
             let model = OverlayModel()
@@ -109,6 +116,10 @@ enum OverlaySnapshot {
             model.committedText = committed
             model.partialText = partial
             model.levels = (0..<OverlayModel.dotCount).map { i in Float(abs(sin(Double(i) * 0.7))) * 0.8 }
+            model.elapsed = 42
+            if name == "recording-countdown" { model.elapsed = 552; model.countdown = 48 }
+            if name == "error-action" { model.errorActionable = true; model.actionTitle = "Open settings" }
+            if name == "high-contrast" { model.increaseContrast = true; model.reduceMotion = true }
             // The pill is one 34 pt row; room around it for its shadow, centered like on screen.
             let view = OverlayView(model: model, onStop: {}, onErrorTap: {})
                 .frame(width: 360, height: 34)

@@ -15,6 +15,9 @@ final class HotkeyMonitor {
     /// app underneath; `onProcessingEscape` is then called on the main queue.
     var escapeCancelsProcessing = false
     var onProcessingEscape: (() -> Void)?
+    /// Every key the user presses (not our own simulated ones), with its modifiers. Runs inside the
+    /// tap callback, so it must stay trivial.
+    var onKeyDown: ((NSEvent) -> Void)?
 
     private var machine = HotkeyStateMachine()
     private var eventTap: CFMachPort?
@@ -187,6 +190,7 @@ final class HotkeyMonitor {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
+        onKeyDown?(event)
         if event.keyCode == 53 /* Escape */ {
             let (events, consumed) = machine.escape()
             emit(events)
