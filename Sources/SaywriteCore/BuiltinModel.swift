@@ -135,6 +135,15 @@ public struct PrefixSnapshots<State> {
     }
 }
 
+/// Settings of the built-in engine that depend on the Mac.
+public enum EngineTuning {
+    /// Seconds llama.cpp keeps the model's GPU memory resident after the last request, or nil for its
+    /// default (a few minutes). On a Mac with 8 GB or less the memory goes back to the system sooner.
+    public static func residencyKeepAlive(physicalMemory: UInt64) -> Int? {
+        physicalMemory <= 8 << 30 ? 30 : nil
+    }
+}
+
 /// Prompt-lookup decoding for cleanup. The answer is nearly a copy of the dictation, so the tokens that
 /// followed the last few answer tokens in the dictation are a good guess for the next ones. The model
 /// checks a whole guess in one decode step and keeps the part it would have produced itself; with greedy

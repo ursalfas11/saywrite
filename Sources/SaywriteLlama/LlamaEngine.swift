@@ -47,6 +47,10 @@ public actor LlamaEngine {
     private var pressureSource: DispatchSourceMemoryPressure?
 
     private static let backendReady: Void = {
+        // Before the Metal device is created, which reads it.
+        if let seconds = EngineTuning.residencyKeepAlive(physicalMemory: ProcessInfo.processInfo.physicalMemory) {
+            setenv("GGML_METAL_RESIDENCY_KEEP_ALIVE_S", String(seconds), 0)
+        }
         llama_backend_init()
         // llama.cpp logs a lot to stderr; the app has its own debug log.
         llama_log_set({ _, _, _ in }, nil)
@@ -79,7 +83,18 @@ public actor LlamaEngine {
         contextParams.n_threads = threads
         contextParams.n_threads_batch = threads
         contextParams.no_perf = true
-        guard let context = llama_init_from_model(model, contextParams) else {
+        // An 8-bit cache halves its memory (~72 MiB less) at no measurable cost in the eval. It needs
+        // Flash Attention, which llama.cpp turns on by itself on Apple GPUs; without it, a 16-bit cache.
+        contextParams.type_k = GGML_TYPE_Q8_0
+        contextParams.type_v = GGML_TYPE_Q8_0
+        var created = llama_init_from_model(model, contextParams)
+        if created == nil {
+            Debug.log("built-in model: no 8-bit cache, using 16 bits")
+            contextParams.type_k = GGML_TYPE_F16
+            contextParams.type_v = GGML_TYPE_F16
+            created = llama_init_from_model(model, contextParams)
+        }
+        guard let context = created else {
             llama_model_free(model)
             throw LLMError.unreachable
         }

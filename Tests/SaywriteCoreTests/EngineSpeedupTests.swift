@@ -101,6 +101,14 @@ final class EngineSpeedupTests: XCTestCase {
         XCTAssertEqual(snapshots.count, 0)
     }
 
+    // MARK: Engine settings
+
+    func testShortResidencyOnlyOnSmallMacs() {
+        XCTAssertEqual(EngineTuning.residencyKeepAlive(physicalMemory: 8 << 30), 30)
+        XCTAssertEqual(EngineTuning.residencyKeepAlive(physicalMemory: 4 << 30), 30)
+        XCTAssertNil(EngineTuning.residencyKeepAlive(physicalMemory: 16 << 30))
+    }
+
     // MARK: Early word check
 
     func testWordGuardAllowsPunctuationAndCapitalization() {
