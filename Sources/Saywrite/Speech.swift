@@ -39,7 +39,20 @@ actor ParakeetTranscriber: Transcriber {
         if padded.count < 16_000 { padded += [Float](repeating: 0, count: 16_000 - padded.count) }
         var state = TdtDecoderState.make(decoderLayers: version.decoderLayers)
         let result = try await manager.transcribe(padded, decoderState: &state, language: language)
+        lastRun = Date()
         return result.text
+    }
+
+    /// End of the last inference. The Neural Engine powers down after some idle time, and the first
+    /// transcription after that costs several times as much (measured: 37–46 ms warm, 200–290 ms
+    /// after two minutes).
+    private(set) var lastRun = Date.distantPast
+
+    /// Wakes the model while the user is still talking, so the first segment does not pay for it.
+    /// Skipped right after a dictation, when it is still warm.
+    func prewarm() async {
+        guard manager != nil, Date().timeIntervalSince(lastRun) > 10 else { return }
+        _ = try? await transcribe([Float](repeating: 0, count: 16_000))
     }
 }
 
@@ -159,6 +172,11 @@ actor Segmenter {
 
     /// Whether speech is going on right now (VAD), or unknown without a VAD.
     var isSpeaking: Bool { vad == nil || inSpeech }
+
+    /// `isSpeaking` and the newest samples, to decide whether to keep recording after the release.
+    func tail(_ count: Int) -> (speaking: Bool, samples: [Float]) {
+        (isSpeaking, Array(buffer.suffix(count)))
+    }
 
     /// The rest of the recording after the last cut. Nil when it holds no speech.
     func flush() -> AudioSegment? {

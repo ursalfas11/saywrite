@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var permissionTimer: Timer?
+    private var systemObservers: [NSObjectProtocol] = []
+    /// Another app has secure input on (password field, some terminals): the event tap may get no keys.
+    private var secureInputActive = false
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -30,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         controller.start()
         watchPermissions()
+        watchSystemEvents()
 
         if !state.accessibilityGranted || Permissions.microphoneStatus != .granted {
             openSettings()
@@ -48,21 +52,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Accessibility can be granted at any time in System Settings; pick it up without a restart.
     private func watchPermissions() {
-        permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let granted = Permissions.accessibilityGranted
-                // A tap created before access was granted exists but receives nothing, so it is
-                // re-created the moment access is granted (or if creating it failed earlier).
-                let justGranted = granted && !self.state.accessibilityGranted
-                if granted && (justGranted || !self.controller.hotkeysActive) {
-                    Debug.log("accessibility granted, restarting hotkeys")
-                    self.controller.restartHotkeys()
-                }
-                self.state.accessibilityGranted = granted
-                self.state.microphoneGranted = Permissions.microphoneStatus == .granted
-            }
+        schedulePermissionTimer(every: 2)
+    }
+
+    private func schedulePermissionTimer(every interval: TimeInterval) {
+        permissionTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkPermissions() }
         }
+        // Nothing here is urgent: the tolerance lets macOS bundle the wake-up with others.
+        timer.tolerance = interval / 4
+        RunLoop.main.add(timer, forMode: .common)
+        permissionTimer = timer
+    }
+
+    private func checkPermissions() {
+        let granted = Permissions.accessibilityGranted
+        // A tap created before access was granted exists but receives nothing, so it is
+        // re-created the moment access is granted (or if creating it failed earlier).
+        let justGranted = granted && !state.accessibilityGranted
+        if granted && (justGranted || !controller.hotkeysActive) {
+            Debug.log("accessibility granted, restarting hotkeys")
+            controller.restartHotkeys()
+        }
+        state.accessibilityGranted = granted
+        state.microphoneGranted = Permissions.microphoneStatus == .granted
+        let secure = TextInserter.secureInputActive
+        if secure != secureInputActive {
+            Debug.log("secure input \(secure ? "on: the trigger key may be blocked" : "off")")
+            secureInputActive = secure
+        }
+        // Every 2 s while something is missing, so granting takes effect at once; then every 10 s,
+        // which still notices a revoked permission or secure input soon enough.
+        let complete = granted && state.microphoneGranted && controller.hotkeysActive
+        let interval: TimeInterval = complete ? 10 : 2
+        if permissionTimer?.timeInterval != interval { schedulePermissionTimer(every: interval) }
+    }
+
+    /// A recording must not run on through sleep, a locked screen or a switch to another user: it
+    /// would be inserted afterwards into whatever is in front then.
+    private func watchSystemEvents() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        let names = [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification,
+                     NSWorkspace.sessionDidResignActiveNotification]
+        for name in names {
+            systemObservers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated { self?.controller.cancelRecording(because: note.name.rawValue) }
+            })
+        }
+        let locked = Notification.Name("com.apple.screenIsLocked")
+        systemObservers.append(DistributedNotificationCenter.default().addObserver(forName: locked, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.controller.cancelRecording(because: locked.rawValue) }
+        })
     }
 
     // MARK: - Menu
@@ -72,6 +113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let status = NSMenuItem(title: statusLine, action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
+        secureInputActive = TextInserter.secureInputActive
+        if secureInputActive {
+            let secure = NSMenuItem(title: L("Secure input active – shortcut may be blocked", "Gesicherte Eingabe aktiv – Tastenkürzel evtl. blockiert"), action: nil, keyEquivalent: "")
+            secure.isEnabled = false
+            menu.addItem(secure)
+        }
         menu.addItem(.separator())
 
         let recent = NSMenuItem(title: L("Recent dictations", "Letzte Diktate"), action: nil, keyEquivalent: "")
