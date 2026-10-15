@@ -109,6 +109,13 @@ public actor LlamaEngine {
         do {
             try load(from: modelURL)
             let system = forRewrite ? Prompts.rewriteSystem(language) : Prompts.cleanupSystem(language)
+            // Every dictation prewarms. With the prompt in the cache (or saved) there is nothing to run:
+            // only the idle countdown starts again.
+            if isPrimed(system: system) {
+                lastUse = Date()
+                idleTimer?.touch()
+                return true
+            }
             let user = forRewrite
                 ? Prompts.rewriteUser(selection: "Hallo.", instruction: "kürzer", language: language)
                 : Prompts.cleanupUser(text: "Hallo.", language: language)
@@ -118,6 +125,12 @@ public actor LlamaEngine {
             Debug.log("built-in model prewarm failed: \(error)")
             return false
         }
+    }
+
+    /// True when the cache holds the system prompt, or its state is saved for a restore.
+    private func isPrimed(system: String) -> Bool {
+        guard context != nil, let vocab, let prefix = try? tokenize(ChatTemplate.prefix(system: system), vocab: vocab) else { return false }
+        return cachedTokens.starts(with: prefix) || snapshots.contains(prefix)
     }
 
     /// Frees the model and its context. The next request loads it again.
