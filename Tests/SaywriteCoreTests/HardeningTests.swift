@@ -252,6 +252,21 @@ final class PrivacyTests: XCTestCase {
         let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
     }
+
+    func testHistoryFileIsExcludedFromBackup() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("history.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = HistoryStore(fileURL: url)
+        store.append(DictationResult(
+            raw: "a", final: "A.", style: .neutral, appBundleID: nil,
+            summary: ChangeSummarizer.summarize(raw: "a", final: "A.", usedLLM: false, llmFailed: false), latency: 0))
+        XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+        // A second save replaces the file; the flag must survive.
+        store.clear()
+        XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+    }
 }
 
 final class OllamaSessionTests: XCTestCase {
