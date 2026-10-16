@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let state = AppState()
     private var overlay: OverlayController!
     private var controller: DictationController!
+    private var updates: UpdateNotifier!
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var permissionTimer: Timer?
@@ -25,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             settings: settings, state: state, overlay: overlay,
             history: HistoryStore(fileURL: HistoryStore.defaultFileURL()))
         controller.openSettings = { [weak self] in self?.openSettings() }
+        // Before anything can open the settings, which show its switch.
+        updates = UpdateNotifier(settings: settings)
         // An accessory app has no menu bar, but its key equivalents (⌘V, ⌘C, ⌘A, ⌘Z, ⌘W) still come
         // from the main menu: without one, text fields in the settings window cannot paste.
         NSApp.mainMenu = Self.makeMainMenu()
@@ -36,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         controller.start()
+        updates.start()
         watchPermissions()
         watchSystemEvents()
 
@@ -129,6 +133,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             secure.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
             menu.addItem(secure)
         }
+        // Only a hint: opens the release page in the browser, nothing is downloaded.
+        if let release = updates.available {
+            let update = NSMenuItem(title: UpdateNotifier.availableText(release), action: #selector(openReleasePage), keyEquivalent: "")
+            update.target = self
+            update.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+            menu.addItem(update)
+        }
         if case .failed = state.modelState {
             let retry = NSMenuItem(title: L("Load speech model again", "Sprachmodell erneut laden"), action: #selector(retryModelLoad), keyEquivalent: "")
             retry.target = self
@@ -212,6 +223,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func openReleasePage() {
+        updates.openReleasePage()
+    }
+
     @objc private func retryModelLoad() {
         controller.retryModelLoad()
     }
@@ -265,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openSettings() {
         if settingsWindow == nil {
-            let view = SettingsView(settings: settings, state: state, controller: controller)
+            let view = SettingsView(settings: settings, state: state, controller: controller, updates: updates)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Saywrite"
             window.styleMask = [.titled, .closable]

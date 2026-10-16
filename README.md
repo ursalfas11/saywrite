@@ -31,7 +31,7 @@ Most dictation apps run every sentence you say through a language model. That is
 - ⚡ **Text before you blink.** Saywrite transcribes and cleans up *while you are still talking*. When you tap the key to stop, the work is basically done: typically **about a quarter of a second from stop to text**, including AI corrections.
 - 🎯 **AI only where it is needed.** Every dictation gets instant, deterministic cleanup: filler words, stutters, capitalization, punctuation and spoken commands. The language model only sees the **sentence** that needs it (plus the one before, when you correct yourself across a pause). Everything else stays exactly as you said it.
 - 👀 **You always know what changed.** After every dictation the pill shows a summary like `2 filler words · AI: 1 correction`, and one click on **↩ Original** swaps in the version without AI.
-- 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model is built in and runs on your Mac with llama.cpp (no Ollama needed). Nothing leaves your Mac and there is no telemetry; the only network traffic is the one-time download of the speech model and, when you click Download, of the language model. If you choose Ollama as the engine and point Saywrite at a server elsewhere, the settings warn you that your dictations go there.
+- 🔒 **Private by design.** Speech recognition runs on the Apple Neural Engine and the language model is built in and runs on your Mac with llama.cpp (no Ollama needed). With the built-in engine your dictations never leave your Mac, and there is no telemetry. Saywrite goes online only to download the speech model once and, when you click Download, the language model, and to ask GitHub once a day whether a newer version exists (can be switched off; see [Privacy and network connections](#privacy-and-network-connections)). If you choose Ollama as the engine and point Saywrite at a server elsewhere, the settings warn you that your dictations go there.
 - 🪶 **Light on memory.** Built for an 8 GB MacBook. The speech model lives on the Neural Engine, and the LLM is loaded when you start dictating and released after 15 idle minutes.
 - 🌍 **English and German**, with automatic language detection. The speech model understands 25 European languages.
 
@@ -173,6 +173,19 @@ Everything else is in the menu bar icon → **Settings**: keys, microphone, lang
 - **Less AI in an app:** set that app to *Casual*, which uses AI only for explicit self-corrections, or switch AI off entirely in the menu.
 - **Debugging:** `open --env SAYWRITE_DEBUG=1 --stderr /tmp/saywrite.log /Applications/Saywrite.app` logs hotkeys, pause detection and every model call, without your dictated text (only its length). Add `SAYWRITE_DEBUG_TEXT=1` to log the text as well; that log contains your dictations, so delete it when you are done.
 
+## Privacy and network connections
+
+Your audio is processed on your Mac, and so is your text unless you point the Ollama engine at another server. Saywrite opens these connections, and no others:
+
+| What | When | What is sent | Can be turned off |
+|---|---|---|---|
+| Speech model from Hugging Face (~600 MB) | First launch, while it is not on the Mac yet | Download requests | No (Saywrite cannot transcribe without it) |
+| Language model from Hugging Face (~1.9 GB) | Only when you click **Download** in the settings | A download request | Don't click Download |
+| Update check: `GET https://api.github.com/repos/ursalfas11/saywrite/releases/latest` | At most once every 24 hours (looked at on launch and every few hours), and when you click **Check now** | Nothing but the request itself: no cookies, no identifiers, no usage data, no dictations; a fixed User-Agent `Saywrite-update-check` without app or system version | **General → Check for updates** (off: no request at all) |
+| Ollama | Only with the Ollama engine: a status query for the installed models, each dictation that needs the AI and each rewrite | The sentence or selection to clean up or rewrite | Use the built-in engine; the address is `localhost` unless you change it |
+
+Like any web request, the downloads and the update check reveal your IP address to Hugging Face or GitHub. When a newer release exists, the menu shows **Version X available…**, which opens the release page in your browser. Saywrite never downloads or installs an update by itself. Errors of the update check (offline, GitHub's rate limit, a captive portal) are ignored and only written to the debug log; **Check now** shows them.
+
 ## Development
 
 ```bash
@@ -201,7 +214,7 @@ Useful hidden flags:
 
 ## Roadmap
 
-- Signed and notarized release builds with auto-update
+- Signed and notarized release builds with automatic updates (today Saywrite only points to a new release)
 - Matching the spacing and capitalization of the text around the cursor
 - Numbered lists and e-mail addresses by voice
 - Learning dictionary entries from your corrections

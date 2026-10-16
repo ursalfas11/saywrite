@@ -7,12 +7,13 @@ struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var state: AppState
     let controller: DictationController
+    let updates: UpdateNotifier
 
     var body: some View {
         TabView {
             SetupTab(settings: settings, state: state, controller: controller)
                 .tabItem { Label(L("Setup", "Einrichtung"), systemImage: "checklist") }
-            GeneralTab(settings: settings, state: state, controller: controller)
+            GeneralTab(settings: settings, state: state, controller: controller, updates: updates)
                 .tabItem { Label(L("General", "Allgemein"), systemImage: "gearshape") }
             StylesTab(settings: settings)
                 .tabItem { Label(L("Styles", "Stile"), systemImage: "textformat") }
@@ -273,6 +274,7 @@ private struct GeneralTab: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var state: AppState
     let controller: DictationController
+    let updates: UpdateNotifier
     @State private var microphones = AudioDevices.inputs()
     @State private var urlRefresh: Task<Void, Never>?
 
@@ -376,6 +378,7 @@ private struct GeneralTab: View {
             }
             Section {
                 LaunchAtLoginRow()
+                UpdateCheckRow(settings: settings, updates: updates)
             }
         }
         .formStyle(.grouped)
@@ -401,6 +404,45 @@ private struct GeneralTab: View {
         .onChange(of: settings.language) { _, _ in controller.applySettings() }
         .onChange(of: settings.ollamaModel) { _, _ in Task { await controller.refreshOllamaStatus() } }
         .onChange(of: settings.llmBackend) { _, _ in controller.backendChanged() }
+        .onChange(of: settings.checkForUpdates) { _, _ in updates.enabledChanged() }
+    }
+}
+
+/// "Check for updates": one request to GitHub per day at most, and a button for checking right away.
+private struct UpdateCheckRow: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var updates: UpdateNotifier
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Toggle(L("Check for updates", "Nach Updates suchen"), isOn: $settings.checkForUpdates)
+                Spacer()
+                Button(L("Check now", "Jetzt prüfen")) { updates.checkNow() }
+                    .controlSize(.small)
+                    .disabled(!settings.checkForUpdates || updates.manualResult == .checking)
+            }
+            if let result = updates.manualResult {
+                switch result {
+                case .checking:
+                    Text(L("Checking…", "Wird geprüft …")).font(.caption).foregroundStyle(.secondary)
+                case .upToDate(let version):
+                    Text(L("Saywrite \(version) is up to date.", "Saywrite \(version) ist aktuell.")).font(.caption).foregroundStyle(.secondary)
+                case .available(let release):
+                    Button(UpdateNotifier.availableText(release)) { updates.openReleasePage() }
+                        .buttonStyle(.link).font(.caption)
+                case .failed(let error):
+                    Text(UpdateNotifier.errorText(error)).font(.caption).foregroundStyle(.orange)
+                }
+            } else if let release = updates.available {
+                Button(UpdateNotifier.availableText(release)) { updates.openReleasePage() }
+                    .buttonStyle(.link).font(.caption)
+            } else {
+                Text(L("Once a day, asks GitHub for the newest version. Sends nothing about you or your dictations; never downloads anything.",
+                       "Fragt einmal täglich bei GitHub die neueste Version ab. Sendet nichts über dich oder deine Diktate; lädt nie etwas herunter."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
