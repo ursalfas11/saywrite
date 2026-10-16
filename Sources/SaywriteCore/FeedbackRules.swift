@@ -2,25 +2,12 @@ import Foundation
 
 /// Which representations of the user's clipboard are saved before a paste and written back after it.
 ///
-/// Reading a representation can be expensive: apps such as Excel, Numbers or Photoshop provide most
-/// types lazily and render them only when asked, and the read blocks the thread that asks (the main
-/// thread, which also serves the hotkey event tap every key press waits for). So only cheap, common
-/// types are saved; an expensive one only when an item has nothing else. Kept free of AppKit so the
-/// rules can be tested.
+/// All of them, as before round 4: saving only cheap types lost data (an Excel range came back
+/// without formulas and formatting, an image copied in Safari as its URL). Reading every type can
+/// make apps such as Excel or Photoshop render their formats for a moment; the snapshot is taken
+/// early in `TextInserter.prepare()`, while the text is still being prepared, so that wait does not
+/// fall on the paste itself. Kept free of AppKit so the rules can be tested.
 public enum ClipboardSnapshotRules {
-    /// Plain and rich text, links, file references and PNG: what a paste target usually reads.
-    public static let cheapTypes: Set<String> = [
-        "public.utf8-plain-text", "public.utf16-external-plain-text", "public.utf16-plain-text", "public.plain-text",
-        "NSStringPboardType", "public.rtf", "NeXT Rich Text Format v1.0 pasteboard type", "public.html",
-        "Apple HTML pasteboard type", "public.file-url", "NSFilenamesPboardType", "public.url", "public.url-name",
-        "Apple URL pasteboard type", "public.png",
-    ]
-
-    /// Markers clipboard managers read (no data worth mentioning); kept so a restored entry keeps them.
-    public static func isMarker(_ type: String) -> Bool {
-        type.hasPrefix("org.nspasteboard.") || type == "com.apple.is-remote-clipboard"
-    }
-
     /// File promises are produced on demand by the source app and cannot be copied.
     public static func isPromise(_ type: String) -> Bool {
         type.lowercased().contains("promise")
@@ -30,13 +17,7 @@ public enum ClipboardSnapshotRules {
     /// be saved (a file promise): then the clipboard is not restored at all rather than half-restored.
     public static func typesToSave(_ types: [String]) -> [String]? {
         if types.contains(where: isPromise) { return nil }
-        let cheap = types.filter { cheapTypes.contains($0) || isMarker($0) }
-        if cheap.contains(where: { !isMarker($0) }) { return cheap }
-        // Nothing cheap (an image from Photoshop, a PDF, a table only as a private type): keep the
-        // first, richest representation, which is what a paste uses, and leave the alternatives out.
-        guard let first = types.first(where: { !isMarker($0) && !$0.hasPrefix("dyn.") })
-            ?? types.first(where: { !isMarker($0) }) else { return cheap }
-        return cheap + [first]
+        return types
     }
 }
 

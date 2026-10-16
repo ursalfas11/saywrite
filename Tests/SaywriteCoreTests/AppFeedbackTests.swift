@@ -7,17 +7,15 @@ final class AppFeedbackTests: XCTestCase {
 
     // MARK: Clipboard snapshot (ux-07)
 
-    func testPlainTextItemKeepsOnlyCheapTypes() {
-        let types = ["public.utf8-plain-text", "com.microsoft.Excel.sheet", "public.html", "org.nspasteboard.source"]
-        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(types), ["public.utf8-plain-text", "public.html", "org.nspasteboard.source"])
-    }
-
-    func testExpensiveTypeIsSavedOnlyWhenItIsTheOnlyRepresentation() {
-        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(["com.adobe.photoshop-image", "public.tiff"]), ["com.adobe.photoshop-image"])
-        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(["public.tiff", "public.png"]), ["public.png"])
-        // A legacy dynamic alias is not chosen while a named type exists.
-        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(["dyn.ah62d4rv4gu8y", "com.adobe.pdf"]), ["com.adobe.pdf"])
-        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(["dyn.ah62d4rv4gu8y"]), ["dyn.ah62d4rv4gu8y"])
+    // Every representation is saved again, as on main: keeping only cheap types lost the formulas and
+    // formatting of an Excel range and turned an image copied in Safari into its URL. The cost of
+    // reading them falls into prepare(), while the text is still being prepared.
+    func testEveryRepresentationIsSaved() {
+        let excel = ["public.utf8-plain-text", "com.microsoft.Excel.sheet", "public.html", "org.nspasteboard.source"]
+        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(excel), excel)
+        let safariImage = ["public.tiff", "public.png", "public.url", "public.url-name"]
+        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(safariImage), safariImage)
+        XCTAssertEqual(ClipboardSnapshotRules.typesToSave(["dyn.ah62d4rv4gu8y", "com.adobe.pdf"]), ["dyn.ah62d4rv4gu8y", "com.adobe.pdf"])
     }
 
     func testFilePromiseCannotBeSaved() {

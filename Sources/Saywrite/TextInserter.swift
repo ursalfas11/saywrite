@@ -63,7 +63,7 @@ enum TextInserter {
         fileprivate let changeCount: Int
     }
 
-    /// Starts the probe in the background and saves the clipboard now (cheap types only).
+    /// Starts the probe in the background and saves the clipboard now.
     static func prepare() async -> Preparation? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let bundleID = app.bundleIdentifier ?? ""
@@ -384,9 +384,9 @@ enum TextInserter {
     fileprivate typealias SavedItem = [(NSPasteboard.PasteboardType, Data)]
 
     /// Nil when the clipboard holds something too big or lazy (file promises) to copy safely;
-    /// then it is not restored rather than half-restored. Only cheap representations are read
-    /// (`ClipboardSnapshotRules`): reading every type made Excel or Photoshop render all their formats
-    /// while the main thread, and with it every key press in the system, waited.
+    /// then it is not restored rather than half-restored. Every representation is read
+    /// (`ClipboardSnapshotRules`): a lost format is worse than the moment Excel or Photoshop need to
+    /// render them, which `prepare()` takes while the text is still being prepared.
     private static func savePasteboard() -> [SavedItem]? {
         let items = NSPasteboard.general.pasteboardItems ?? []
         var saved: [SavedItem] = []
