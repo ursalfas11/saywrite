@@ -4,16 +4,26 @@ import SaywriteCore
 /// Watches a modifier key that is held on its own, system-wide, via an active CGEventTap (needs
 /// the Accessibility permission). The tap is a filter, not listen-only, because Esc that cancels a
 /// recording is swallowed; every key press therefore waits for the callback, which must stay fast.
-/// The tap-or-hold logic lives in `HotkeyStateMachine`.
+/// The tap-or-hold logic lives in `HotkeyStateMachine`. Clicks and scrolling come through a second,
+/// listen-only tap: they are never swallowed, and a busy main thread must not make the mouse lag.
 @MainActor
 final class HotkeyMonitor {
     var dictateKey: TriggerKey
     var rewriteKey: TriggerKey
     var onEvent: ((HotkeyEvent) -> Void)?
+    /// While the controller processes a released recording, Esc cancels that instead of reaching the
+    /// app underneath; `onProcessingEscape` is then called on the main queue.
+    var escapeCancelsProcessing = false
+    var onProcessingEscape: (() -> Void)?
+    /// Every key the user presses (not our own simulated ones), with its modifiers. Runs inside the
+    /// tap callback, so it must stay trivial.
+    var onKeyDown: ((NSEvent) -> Void)?
 
     private var machine = HotkeyStateMachine()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var pointerTap: CFMachPort?
+    private var pointerSource: CFRunLoopSource?
     private var confirmTimer: Timer?
     var handsFree: Bool { machine.handsFree }
 
@@ -59,7 +69,56 @@ final class HotkeyMonitor {
         CGEvent.tapEnable(tap: tap, enable: true)
         eventTap = tap
         runLoopSource = source
+        startPointerTap()
         return true
+    }
+
+    /// A click with the trigger held (⌘-click, ⌥-click) is a shortcut too. Without this tap it would
+    /// start a recording. Not having it is no reason to fail: the keys still work.
+    private func startPointerTap() {
+        let types: [CGEventType] = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
+        let callback: CGEventTapCallBack = { _, type, event, userInfo in
+            guard let userInfo else { return Unmanaged.passUnretained(event) }
+            let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(userInfo).takeUnretainedValue()
+            switch type {
+            case .tapDisabledByTimeout, .tapDisabledByUserInput:
+                MainActor.assumeIsolated { monitor.reenablePointerTap() }
+            case .scrollWheel:
+                // Momentum scrolling runs on after the fingers left the trackpad: no gesture of the user.
+                if event.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0 {
+                    MainActor.assumeIsolated { monitor.handlePointer(scroll: true) }
+                }
+            default:
+                MainActor.assumeIsolated { monitor.handlePointer(scroll: false) }
+            }
+            return Unmanaged.passUnretained(event)
+        }
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
+            eventsOfInterest: mask, callback: callback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque())
+        else {
+            Debug.log("pointer tap refused")
+            return
+        }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        pointerTap = tap
+        pointerSource = source
+    }
+
+    private func reenablePointerTap() {
+        if let pointerTap { CGEvent.tapEnable(tap: pointerTap, enable: true) }
+    }
+
+    private func handlePointer(scroll: Bool) {
+        // Most clicks happen with no trigger held: nothing to do.
+        guard machine.heldAction != nil else { return }
+        let events = machine.pointer(scroll: scroll)
+        if !events.isEmpty { Debug.log("cancel: click or scroll while holding") }
+        emit(events)
     }
 
     func stop() {
@@ -71,6 +130,13 @@ final class HotkeyMonitor {
         }
         eventTap = nil
         runLoopSource = nil
+        if let pointerSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), pointerSource, .commonModes) }
+        if let pointerTap {
+            CGEvent.tapEnable(tap: pointerTap, enable: false)
+            CFMachPortInvalidate(pointerTap)
+        }
+        pointerTap = nil
+        pointerSource = nil
     }
 
     var isRunning: Bool { eventTap != nil }
@@ -124,11 +190,17 @@ final class HotkeyMonitor {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
+        onKeyDown?(event)
         if event.keyCode == 53 /* Escape */ {
             let (events, consumed) = machine.escape()
             emit(events)
+            if !consumed, escapeCancelsProcessing {
+                DispatchQueue.main.async { [weak self] in self?.onProcessingEscape?() }
+                return true
+            }
             return consumed
         }
+        // After the hold is confirmed, keys no longer cancel (see HotkeyStateMachine.otherKey).
         let events = machine.otherKey()
         if !events.isEmpty { Debug.log("cancel: key \(event.keyCode) pressed while holding") }
         emit(events)
@@ -172,11 +244,15 @@ final class HotkeyMonitor {
         guard events.contains(.begin(action)) else { return }
         emit(events)
         confirmTimer?.invalidate()
-        confirmTimer = Timer.scheduledTimer(withTimeInterval: machine.minimumHold, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: machine.minimumHold, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let confirmed = self.machine.confirmation() else { return }
                 self.emit([confirmed])
             }
         }
+        // Common modes: the confirmation also fires while a menu or a drag tracks events, instead of
+        // waiting until the release has overtaken it.
+        RunLoop.main.add(timer, forMode: .common)
+        confirmTimer = timer
     }
 }

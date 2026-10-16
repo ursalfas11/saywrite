@@ -5,20 +5,31 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+# One run per ref; a new push to a pull request cancels the older run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: macos-15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
       - name: Cache SwiftPM packages and the llama.cpp framework
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             .build/artifacts
           key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
       - name: Unit tests
         run: swift test
       - name: Build the app
@@ -26,17 +37,60 @@ jobs:
       - name: Check the embedded llama.framework (signature, rpath, dyld link)
         run: |
           codesign --verify --deep --strict build/Saywrite.app
+          # The designated requirement keeps the Accessibility/Microphone grants across updates. A silent change
+          # (for example a cdhash requirement) would reset them for every user.
+          codesign -d -r- build/Saywrite.app 2>&1 | tee "$RUNNER_TEMP/dr.txt"
+          grep -F 'identifier "dev.saywrite.app"' "$RUNNER_TEMP/dr.txt"
           otool -l build/Saywrite.app/Contents/MacOS/Saywrite | grep -A2 LC_RPATH | grep "@executable_path/../Frameworks"
           otool -L build/Saywrite.app/Contents/MacOS/Saywrite | grep llama.framework
           # Starting the binary makes dyld resolve every framework; this mode renders PNGs and exits. The model is never downloaded in CI.
           build/Saywrite.app/Contents/MacOS/Saywrite --render-overlay "$RUNNER_TEMP/overlay"
+      - name: Upload the rendered recorder pill states
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: overlay-states
+          path: ${{ runner.temp }}/overlay/*.png
+          retention-days: 30
       - name: Pack the app
         # ditto keeps the bundle's permissions and signature; upload-artifact alone would drop the executable bit.
         run: ditto -c -k --keepParent build/Saywrite.app build/Saywrite.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Saywrite
           path: build/Saywrite.zip
           retention-days: 30
       - name: Rules-only eval (no LLM on the runner, fails below Tests/Eval/rules-baseline.txt)
         run: scripts/eval-rules.sh
+
+  # Not blocking: data-race check of the core. Red here does not fail the pull request.
+  tsan:
+    runs-on: macos-15
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+      - name: Cache SwiftPM packages and the llama.cpp framework
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build/artifacts
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+      - name: Core tests with ThreadSanitizer
+        run: swift test --sanitize=thread --filter SaywriteCoreTests
+
+  # Not blocking: early warning for the newest macOS and Xcode.
+  latest-macos:
+    runs-on: macos-26
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select the newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+      - name: Unit tests
+        run: swift test

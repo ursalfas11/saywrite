@@ -1,0 +1,302 @@
+[
+{
+"id": "r-b1-de-1seg",
+"style": "neutral",
+"segs": [
+"Ich brauche drei Ordner für das Büro. Nein, ich meine, ich brauche vier Ordner für das Büro."
+],
+"expected": "Ich brauche vier Ordner für das Büro."
+},
+{
+"id": "r-b1-de-2seg",
+"style": "neutral",
+"segs": [
+"Ich brauche drei Ordner für das Büro.",
+"Nein, ich meine, ich brauche vier Ordner für das Büro."
+],
+"expected": "Ich brauche vier Ordner für das Büro."
+},
+{
+"id": "r-b1-de-nee",
+"style": "neutral",
+"segs": [
+"Wir treffen uns um fünf Uhr am Bahnhof.",
+"Nee, ich meine, wir treffen uns um sechs Uhr am Bahnhof."
+],
+"expected": "Wir treffen uns um sechs Uhr am Bahnhof."
+},
+{
+"id": "r-b1-de-odernein",
+"style": "neutral",
+"segs": [
+"Die Lieferung kommt am Montag ins Lager.",
+"Oder nein, ich meine, die Lieferung kommt am Dienstag ins Lager."
+],
+"expected": "Die Lieferung kommt am Dienstag ins Lager."
+},
+{
+"id": "r-b1-de-casual",
+"style": "casual",
+"segs": [
+"Ich bringe zwei Flaschen Wasser mit.",
+"Nein, ich meine, ich bringe drei Flaschen Wasser mit."
+],
+"expected": "Ich bringe drei Flaschen Wasser mit"
+},
+{
+"id": "r-b1-en-1seg",
+"style": "neutral",
+"segs": [
+"I need three folders for the office. No, I mean, I need four folders for the office."
+],
+"expected": "I need four folders for the office."
+},
+{
+"id": "r-b1-en-2seg",
+"style": "neutral",
+"segs": [
+"The package arrives on Monday at the warehouse.",
+"Oh no, I mean, the package arrives on Tuesday at the warehouse."
+],
+"expected": "The package arrives on Tuesday at the warehouse."
+},
+{
+"id": "r-b1-neg-de",
+"style": "neutral",
+"segs": [
+"Hast du den Schlüssel gefunden? Nein, ich meine, der Schlüssel liegt im Auto."
+],
+"expected": "Hast du den Schlüssel gefunden? Nein, ich meine, der Schlüssel liegt im Auto."
+},
+{
+"id": "r-b1-neg-de-2seg",
+"style": "neutral",
+"segs": [
+"Gefällt dir der Entwurf?",
+"Nein, ich meine, die Farben sind zu dunkel."
+],
+"expected": "Gefällt dir der Entwurf? Nein, ich meine, die Farben sind zu dunkel."
+},
+{
+"id": "r-b1-neg-en",
+"style": "neutral",
+"segs": [
+"Did you find the key? No, I mean, the key is in the car."
+],
+"expected": "Did you find the key? No, I mean, the key is in the car."
+},
+{
+"id": "r-b2-de-und",
+"style": "neutral",
+"segs": [
+"Bitte prüfe morgen den Bericht.",
+"und schicke ihn dann an das Team."
+],
+"expected": "Bitte prüfe morgen den Bericht und schicke ihn dann an das Team."
+},
+{
+"id": "r-b2-de-verb",
+"style": "neutral",
+"segs": [
+"Für die neue Wohnung.",
+"brauche ich noch zwei Lampen und einen Teppich."
+],
+"expected": "Für die neue Wohnung brauche ich noch zwei Lampen und einen Teppich."
+},
+{
+"id": "r-b2-de-three",
+"style": "neutral",
+"segs": [
+"Ich räume heute den Keller auf.",
+"und danach fahre ich zum Wertstoffhof.",
+"Morgen ist dann der Dachboden dran."
+],
+"expected": "Ich räume heute den Keller auf und danach fahre ich zum Wertstoffhof. Morgen ist dann der Dachboden dran."
+},
+{
+"id": "r-b2-en-and",
+"style": "neutral",
+"segs": [
+"Please check the report tomorrow.",
+"and send it to the team."
+],
+"expected": "Please check the report tomorrow and send it to the team."
+},
+{
+"id": "r-b2-neg-question",
+"style": "neutral",
+"segs": [
+"Kommst du heute?",
+"und wann genau?"
+],
+"expected": "Kommst du heute? Und wann genau?"
+},
+{
+"id": "r-b2-neg-brand",
+"style": "neutral",
+"segs": [
+"Der Bericht ist fertig.",
+"iPhone-Fotos fehlen noch."
+],
+"expected": "Der Bericht ist fertig. iPhone-Fotos fehlen noch."
+},
+{
+"id": "r-b2-neg-abbr",
+"style": "neutral",
+"segs": [
+"Wir brauchen Stifte, Papier usw.",
+"und dann noch Toner."
+],
+"expected": "Wir brauchen Stifte, Papier usw. und dann noch Toner."
+},
+{
+"id": "r-b2-neg-capital-de",
+"style": "neutral",
+"segs": [
+"Der Entwurf ist fertig.",
+"Die Zahlen prüfe ich morgen."
+],
+"expected": "Der Entwurf ist fertig. Die Zahlen prüfe ich morgen."
+},
+{
+"id": "r-b2-neg-capital-en",
+"style": "neutral",
+"segs": [
+"The draft is done.",
+"I will check the numbers tomorrow."
+],
+"expected": "The draft is done. I will check the numbers tomorrow."
+},
+{
+"id": "r-b2-neg-filler-de",
+"style": "neutral",
+"segs": [
+"Der Bericht ist fertig.",
+"ähm, ich schicke ihn morgen."
+],
+"expected": "Der Bericht ist fertig. Ich schicke ihn morgen."
+},
+{
+"id": "r-b2-neg-filler-en",
+"style": "neutral",
+"segs": [
+"The report is done.",
+"um, we send it tomorrow."
+],
+"expected": "The report is done. We send it tomorrow."
+},
+{
+"id": "r-b2-ordinal-de",
+"style": "neutral",
+"segs": [
+"Wir treffen uns am 15.",
+"um 10 Uhr im Büro."
+],
+"expected": "Wir treffen uns am 15. um 10 Uhr im Büro."
+},
+{
+"id": "r-b2-date-de",
+"style": "neutral",
+"segs": [
+"Die Frist endet am 3.10.",
+"und nicht später."
+],
+"expected": "Die Frist endet am 3.10. und nicht später."
+},
+{
+"id": "r-b5-um",
+"style": "neutral",
+"segs": [
+"Um"
+],
+"expected": "<nichts>"
+},
+{
+"id": "r-b5-aeh",
+"style": "neutral",
+"segs": [
+"Äh."
+],
+"expected": "<nichts>"
+},
+{
+"id": "r-b5-aehm-aeh",
+"style": "neutral",
+"segs": [
+"Ähm, äh."
+],
+"expected": "<nichts>"
+},
+{
+"id": "r-b5-uh",
+"style": "neutral",
+"segs": [
+"Uh, hmm."
+],
+"expected": "<nichts>"
+},
+{
+"id": "r-b5-neg-um-acht",
+"style": "neutral",
+"segs": [
+"Um acht."
+],
+"expected": "Um acht."
+},
+{
+"id": "r-b5-neg-hm",
+"style": "neutral",
+"segs": [
+"Hm, gute Frage."
+],
+"expected": "Gute Frage."
+},
+{
+"id": "r-b5-neg-en",
+"style": "neutral",
+"segs": [
+"Um, see you at eight."
+],
+"expected": "See you at eight."
+},
+{
+"id": "r-keep-de-short",
+"style": "neutral",
+"segs": [
+"Bin in zehn Minuten da."
+],
+"expected": "Bin in zehn Minuten da."
+},
+{
+"id": "r-keep-de-question",
+"style": "neutral",
+"segs": [
+"Kannst du mir die Datei schicken?"
+],
+"expected": "Kannst du mir die Datei schicken?"
+},
+{
+"id": "r-keep-de-casual",
+"style": "casual",
+"segs": [
+"Danke, passt so."
+],
+"expected": "Danke, passt so"
+},
+{
+"id": "r-keep-en-short",
+"style": "neutral",
+"segs": [
+"Running ten minutes late."
+],
+"expected": "Running ten minutes late."
+},
+{
+"id": "r-keep-en-question",
+"style": "neutral",
+"segs": [
+"Can you send me the file?"
+],
+"expected": "Can you send me the file?"
+}
+]

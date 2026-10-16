@@ -185,7 +185,7 @@ final class CircuitBreakerTests: XCTestCase {
     override func setUp() { UILanguage.override = true }
     override func tearDown() { UILanguage.override = nil }
 
-    private let twoCorrections = [1: "um drei, nein, um vier.", 2: "am Montag, nein, am Dienstag."]
+    private let twoCorrections = [1: "um drei, nein, um vier.", 2: "Am Montag, nein, am Dienstag."]
 
     func testTimeoutStopsFurtherCallsInTheSameDictation() async {
         let llm = ThrowingLLM(error: .timeout)
@@ -251,6 +251,21 @@ final class PrivacyTests: XCTestCase {
             summary: ChangeSummarizer.summarize(raw: "a", final: "A.", usedLLM: false, llmFailed: false), latency: 0))
         let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
+    }
+
+    func testHistoryFileIsExcludedFromBackup() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("history.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = HistoryStore(fileURL: url)
+        store.append(DictationResult(
+            raw: "a", final: "A.", style: .neutral, appBundleID: nil,
+            summary: ChangeSummarizer.summarize(raw: "a", final: "A.", usedLLM: false, llmFailed: false), latency: 0))
+        XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+        // A second save replaces the file; the flag must survive.
+        store.clear()
+        XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
     }
 }
 
