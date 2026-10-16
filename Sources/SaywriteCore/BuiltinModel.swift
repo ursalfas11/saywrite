@@ -164,7 +164,8 @@ public enum EngineTuning {
 /// Prompt-lookup decoding for cleanup. The answer is nearly a copy of the dictation, so the tokens that
 /// followed the last few answer tokens in the dictation are a good guess for the next ones. The model
 /// checks a whole guess in one decode step and keeps the part it would have produced itself; with greedy
-/// decoding the answer is the same as decoding one token at a time, only faster.
+/// decoding the answer matches decoding one token at a time, only faster, up to ties: where two tokens
+/// score (nearly) the same, the batched logits may differ in the last bits and pick the other one.
 public enum PromptLookup {
     /// Tokens guessed per step. Measured on an M5 with Qwen2.5-3B: 2.1–2.8× faster decoding at 8.
     public static let draftLength = 8
