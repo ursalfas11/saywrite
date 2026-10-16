@@ -123,6 +123,12 @@ public actor LlamaEngine {
     public func prewarm(modelURL: URL, language: DictationLanguage, forRewrite: Bool) -> Bool {
         do {
             try load(from: modelURL)
+            // `shutdown()` came while the model loaded: free it now, not after decoding the prompt, so the
+            // process does not exit with the Metal model alive.
+            if closed.value {
+                unload()
+                return false
+            }
             let system = forRewrite ? Prompts.rewriteSystem(language) : Prompts.cleanupSystem(language)
             // Every dictation prewarms. With the prompt in the cache (or saved) there is nothing to run:
             // only the idle countdown starts again.
@@ -257,6 +263,8 @@ public actor LlamaEngine {
     public func generate(
         system: String, user: String, maxTokens: Int, abort: AbortFlag, requireFinished: Bool = true, decoding: Decoding = .sample
     ) throws -> String {
+        // After `shutdown()` only the final unload may run; a request queued before it must not decode.
+        if closed.value { throw LLMError.unreachable }
         guard let context, let vocab else { throw LLMError.unreachable }
         if abort.isSet || Task.isCancelled { throw LLMError.timeout }
         abortBox.flag = abort
