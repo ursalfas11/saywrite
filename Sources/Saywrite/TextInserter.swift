@@ -314,6 +314,8 @@ enum TextInserter {
         case .empty: return nil
         case .unavailable: break
         }
+        // A rewrite cancelled meanwhile sends no ⌘C: the clipboard stays as it is.
+        guard !Task.isCancelled else { return nil }
         let pasteboard = NSPasteboard.general
         // During a pending paste restore the clipboard holds our own text; keep the real original.
         let pendingOriginal = userClipboard
@@ -322,11 +324,14 @@ enum TextInserter {
         pasteGeneration += 1
         manualPasteGeneration = nil
         userClipboard = nil
+        let generation = pasteGeneration
         let before = pasteboard.changeCount
         postCommand(key: CGKeyCode(kVK_ANSI_C))
+        // Once ⌘C is sent, the wait runs to its end even when the rewrite is cancelled meanwhile:
+        // returning early would leave the selection on the clipboard instead of the user's content.
         var text: String?
         for _ in 0..<15 {
-            try? await Task.sleep(nanoseconds: 30_000_000)
+            await pauseIgnoringCancellation(nanoseconds: 30_000_000)
             if pasteboard.changeCount != before {
                 text = pasteboard.string(forType: .string)
                 break
@@ -334,10 +339,36 @@ enum TextInserter {
         }
         // Restore when the copy happened, and always when we took over a pending paste restore
         // (its restore was cancelled above, so the user's original must come back now).
+        let copied = pasteboard.changeCount != before
         let tookOverPending = pendingOriginal != nil
-        if pasteboard.changeCount != before || tookOverPending, let saved { restorePasteboard(saved) }
+        if copied || tookOverPending, let saved { restorePasteboard(saved) }
+        if !copied, let saved { restoreLateCopy(saved, generation: generation) }
         guard let text, !text.isEmpty else { return nil }
         return text
+    }
+
+    /// An app that needs longer than the wait above to answer ⌘C still overwrites the clipboard with
+    /// the selection: put the user's content back then. Only within a short window, and only while no
+    /// other paste or copy of ours took over, so a later copy of the user is left alone.
+    private static func restoreLateCopy(_ saved: [SavedItem], generation: Int) {
+        let pasteboard = NSPasteboard.general
+        let baseline = pasteboard.changeCount
+        Task {
+            for _ in 0..<50 {
+                await pauseIgnoringCancellation(nanoseconds: 30_000_000)
+                guard generation == pasteGeneration else { return }
+                if pasteboard.changeCount != baseline {
+                    Debug.log("late ⌘C answer: restoring the clipboard")
+                    restorePasteboard(saved)
+                    return
+                }
+            }
+        }
+    }
+
+    /// A sleep that a cancelled task cannot cut short (`Task.sleep` returns at once there).
+    private static func pauseIgnoringCancellation(nanoseconds: UInt64) async {
+        await Task { try? await Task.sleep(nanoseconds: nanoseconds) }.value
     }
 
     // MARK: - Helpers
