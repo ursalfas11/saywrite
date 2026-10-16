@@ -87,10 +87,10 @@ final class HotkeyMonitor {
             case .scrollWheel:
                 // Momentum scrolling runs on after the fingers left the trackpad: no gesture of the user.
                 if event.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0 {
-                    MainActor.assumeIsolated { monitor.handlePointer() }
+                    MainActor.assumeIsolated { monitor.handlePointer(scroll: true) }
                 }
             default:
-                MainActor.assumeIsolated { monitor.handlePointer() }
+                MainActor.assumeIsolated { monitor.handlePointer(scroll: false) }
             }
             return Unmanaged.passUnretained(event)
         }
@@ -113,10 +113,10 @@ final class HotkeyMonitor {
         if let pointerTap { CGEvent.tapEnable(tap: pointerTap, enable: true) }
     }
 
-    private func handlePointer() {
+    private func handlePointer(scroll: Bool) {
         // Most clicks happen with no trigger held: nothing to do.
         guard machine.heldAction != nil else { return }
-        let events = machine.pointer()
+        let events = machine.pointer(scroll: scroll)
         if !events.isEmpty { Debug.log("cancel: click or scroll while holding") }
         emit(events)
     }

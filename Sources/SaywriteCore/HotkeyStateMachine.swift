@@ -31,7 +31,7 @@ public struct HotkeyStateMachine: Sendable {
     public private(set) var handsFree = false
     /// The hold lasted past `minimumHold`: from here on it is a dictation, not a shortcut.
     public private(set) var confirmed = false
-    /// A key was pressed after the confirmation; decided on release (see `triggerUp`).
+    /// A key was pressed or clicked after the confirmation; decided on release (see `triggerUp`).
     private var keyAfterConfirmation = false
 
     public init(minimumHold: TimeInterval = 0.3, lateShortcutWindow: TimeInterval = 1.5) {
@@ -77,11 +77,17 @@ public struct HotkeyStateMachine: Sendable {
         return [.cancel(active)]
     }
 
-    /// A click or scroll while holding the trigger is a modifier click (⌘-click, ⌥-click), at any
-    /// time of the hold: nobody clicks on purpose with the dictation key held. Hands-free recordings
-    /// are not affected, there the key is up while the user works with the mouse.
-    public mutating func pointer() -> [HotkeyEvent] {
+    /// A click or scroll while holding the trigger is a modifier click (⌘-click, ⌥-click) during the
+    /// shortcut window. After the confirmation it is treated like a key: a click decides on release
+    /// (a ⌘-click released soon after is still a shortcut, see `triggerUp`), a scroll is ignored, so
+    /// a long recording is not thrown away. Hands-free recordings are not affected, there the key is
+    /// up while the user works with the mouse.
+    public mutating func pointer(scroll: Bool = false) -> [HotkeyEvent] {
         guard let active, pressTime != nil, !interrupted, !handsFree else { return [] }
+        if confirmed {
+            if !scroll { keyAfterConfirmation = true }
+            return []
+        }
         interrupted = true
         return [.cancel(active)]
     }
@@ -133,8 +139,8 @@ public struct HotkeyStateMachine: Sendable {
         }
         if held >= minimumHold {
             active = nil
-            // A key during the hold and a release soon after: a slowly typed shortcut (⌥ held a
-            // moment, then L for @), not a dictation. A long recording with a stray key is kept.
+            // A key or click during the hold and a release soon after: a slowly typed shortcut (⌥ held
+            // a moment, then L for @; a ⌘-click), not a dictation. A long recording with a stray key is kept.
             if keyAfterConfirmation, held < lateShortcutWindow { return [.cancel(action)] }
             return [.end(action)]
         }

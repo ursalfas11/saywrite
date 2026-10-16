@@ -72,14 +72,40 @@ final class TriggerKeyTests: XCTestCase {
 
     // MARK: - Clicks while holding
 
-    func testClickWhileHoldingCancelsEvenAfterConfirmation() {
+    // After the confirmation a click counts like a key: a ⌘-click released soon after is a shortcut,
+    // a long recording with a click in it is kept.
+    func testClickAfterConfirmationCancelsOnlyOnAQuickRelease() {
         var machine = HotkeyStateMachine()
         _ = machine.triggerDown(.rewrite, at: t0)
         _ = machine.confirmation()
-        XCTAssertEqual(machine.pointer(), [.cancel(.rewrite)]) // ⌘-click with the right ⌘
-        XCTAssertEqual(machine.pointer(), [])
-        XCTAssertEqual(machine.triggerUp(.rewrite, at: t0 + 2), [])
+        XCTAssertEqual(machine.pointer(), []) // ⌘-click with the right ⌘
+        XCTAssertEqual(machine.triggerUp(.rewrite, at: t0 + 1), [.cancel(.rewrite)])
         XCTAssertNil(machine.active)
+    }
+
+    func testClickInALongConfirmedHoldKeepsTheDictation() {
+        var machine = HotkeyStateMachine()
+        _ = machine.triggerDown(.dictate, at: t0)
+        _ = machine.confirmation()
+        XCTAssertEqual(machine.pointer(), [])
+        XCTAssertEqual(machine.triggerUp(.dictate, at: t0 + 20), [.end(.dictate)])
+    }
+
+    func testScrollAfterConfirmationIsIgnored() {
+        var machine = HotkeyStateMachine()
+        _ = machine.triggerDown(.dictate, at: t0)
+        _ = machine.confirmation()
+        XCTAssertEqual(machine.pointer(scroll: true), [])
+        // Even a quick release after the scroll ends the dictation normally.
+        XCTAssertEqual(machine.triggerUp(.dictate, at: t0 + 0.8), [.end(.dictate)])
+    }
+
+    func testScrollBeforeConfirmationStillCancels() {
+        var machine = HotkeyStateMachine()
+        _ = machine.triggerDown(.dictate, at: t0)
+        XCTAssertEqual(machine.pointer(scroll: true), [.cancel(.dictate)])
+        XCTAssertNil(machine.confirmation())
+        XCTAssertEqual(machine.triggerUp(.dictate, at: t0 + 2), [])
     }
 
     func testQuickClickCancelsAndNoConfirmationFollows() {
