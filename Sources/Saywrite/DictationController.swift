@@ -694,6 +694,8 @@ final class DictationController {
         // Cancelled meanwhile (Esc, sleep): cancelProcessing cleaned up, and a new recording may run.
         guard sessionID == id, !Task.isCancelled else { return }
         let allSamples = await audio.stop()
+        // Cancelled during the stop: the sample handler and timing may already belong to the next dictation.
+        guard sessionID == id else { return }
         timing?.audioStopped = Date()
         audio.setSampleHandler(nil)
         stream?.finish()
@@ -705,6 +707,8 @@ final class DictationController {
         guard sessionID == id else { return }
         if secureFieldSeen {
             if let session { await session.cancel() }
+            // Cancelled meanwhile: the hotkeys, the panel and the state belong to the next session.
+            guard sessionID == id else { return }
             hotkeys.reset()
             showError(L("Password field – not recorded", "Passwortfeld – nicht aufgenommen"), action: nil)
             teardown()
@@ -895,6 +899,8 @@ final class DictationController {
         let app = sessionApp
         let autoStopped = autoStoppedSession == id
         let selection = await selectionTask?.value
+        // Cancelled while the selection was read: "Cancelled" stays, no "No text selected" over it.
+        guard sessionID == id else { return }
         guard let selection else {
             showError(L("No text selected – select text, then try again", "Kein Text markiert – erst Text markieren"), action: nil)
             return
