@@ -93,8 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if permissionTimer?.timeInterval != interval { schedulePermissionTimer(every: interval) }
     }
 
-    /// A recording must not run on through sleep, a locked screen or a switch to another user: it
-    /// would be inserted afterwards into whatever is in front then.
+    /// A recording, or a dictation still being processed, must not run on through sleep, a locked
+    /// screen or a switch to another user: it would be inserted afterwards into whatever is in front then.
     private func watchSystemEvents() {
         let workspace = NSWorkspace.shared.notificationCenter
         let names = [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification,

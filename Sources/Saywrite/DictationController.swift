@@ -85,6 +85,9 @@ final class DictationController {
     private var keysSinceInsert = 0
     /// The session that stopped by itself (silence or maximum length): its text is not inserted.
     private var autoStoppedSession: UUID?
+    /// The text of the current dictation once it is ready and waits for its paste, so a cancel by the
+    /// system (sleep, lock, user switch) can keep it in the history.
+    private var readyResult: (id: UUID, result: DictationResult)?
     /// The text of the last automatically stopped dictation, for the "Insert" button of its pill.
     private var pendingAutoStop: PendingInsert?
     /// Opens the settings window (set by the app delegate), for errors whose fix is there.
@@ -640,8 +643,9 @@ final class DictationController {
     }
 
     /// Esc while the text is being prepared (transcription, AI, up to 30 s for a rewrite): nothing
-    /// is inserted.
-    func cancelProcessing() {
+    /// is inserted or copied. `keepingResult`: a dictation whose text is already ready goes to the
+    /// history (if it is on), so a cancel by the system does not lose it.
+    func cancelProcessing(keepingResult: Bool = false) {
         guard case .processing = phase else { return }
         Debug.log("processing cancelled")
         finishTask?.cancel()
@@ -652,20 +656,40 @@ final class DictationController {
         selectionTask?.cancel()
         secureProbeTask?.cancel()
         if let session { Task { await session.cancel() } }
+        // Not for a password field, or a possible one (secure input at the start): those never go to
+        // the history file. The secure input of a locked screen is no reason to drop the text.
+        var kept = false
+        if keepingResult, let ready = readyResult, ready.id == sessionID, settings.keepHistory,
+           !secureFieldSeen, !sessionWithholdAI {
+            appendToHistory(ready.result)
+            kept = true
+        }
         // Whatever the cancelled finish still delivers belongs to an old session and is dropped.
         sessionID = UUID()
         teardown()
         // Orange like the other hints that need no further action, so it is not read as "inserted".
-        overlay.show(.notice(L("Cancelled – nothing inserted", "Abgebrochen – nichts eingefügt"), symbol: "xmark.circle"))
+        if kept {
+            overlay.show(.notice(L("Cancelled – text kept in the history", "Abgebrochen – Text im Verlauf"), symbol: "xmark.circle"))
+        } else {
+            overlay.show(.notice(L("Cancelled – nothing inserted", "Abgebrochen – nichts eingefügt"), symbol: "xmark.circle"))
+        }
     }
 
-    /// Sleep, screen lock or a user switch: a running recording is thrown away, so it is not
-    /// inserted later into whatever is in front then.
+    /// Sleep, screen lock or a user switch: a running recording is thrown away, and a dictation
+    /// still being processed is neither inserted nor copied, so nothing lands later in whatever is
+    /// in front then. A text that is already ready stays in the history.
     func cancelRecording(because reason: String) {
-        guard case .recording = phase else { return }
-        Debug.log("recording cancelled: \(reason)")
-        hotkeys.reset()
-        cancel()
+        switch phase {
+        case .recording:
+            Debug.log("recording cancelled: \(reason)")
+            hotkeys.reset()
+            cancel()
+        case .processing:
+            Debug.log("processing cancelled: \(reason)")
+            cancelProcessing(keepingResult: true)
+        case .idle:
+            break
+        }
     }
 
     private func phaseChanged() {
@@ -775,8 +799,10 @@ final class DictationController {
             readyForNext(id)
             return
         }
+        readyResult = (id, result)
         let prepared = await preparation?.value
-        // Cancelled while the probe finished: nothing is inserted, copied or kept in the history.
+        // Cancelled while the probe finished: nothing is inserted, copied or kept in the history
+        // (a cancel by the system has kept it there already, see cancelProcessing).
         guard sessionID == id else { return }
         overlay.model.committedText = result.final
         overlay.model.partialText = ""
@@ -1026,6 +1052,7 @@ final class DictationController {
         secureProbeTask = nil
         previewTask = nil
         finishTask = nil
+        readyResult = nil
     }
 
     private func showError(_ message: String, action: (() -> Void)?, actionTitle: String? = nil) {
