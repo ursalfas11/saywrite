@@ -244,11 +244,15 @@ final class HotkeyMonitor {
         guard events.contains(.begin(action)) else { return }
         emit(events)
         confirmTimer?.invalidate()
-        confirmTimer = Timer.scheduledTimer(withTimeInterval: machine.minimumHold, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: machine.minimumHold, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let confirmed = self.machine.confirmation() else { return }
                 self.emit([confirmed])
             }
         }
+        // Common modes: the confirmation also fires while a menu or a drag tracks events, instead of
+        // waiting until the release has overtaken it.
+        RunLoop.main.add(timer, forMode: .common)
+        confirmTimer = timer
     }
 }

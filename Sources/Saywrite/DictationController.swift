@@ -85,6 +85,8 @@ final class DictationController {
     private var keysSinceInsert = 0
     /// The session that stopped by itself (silence or maximum length): its text is not inserted.
     private var autoStoppedSession: UUID?
+    /// The session whose microphone failed to start after the key was already released.
+    private var microphoneFailedSession: UUID?
     /// The text of the current dictation once it is ready and waits for its paste, so a cancel by the
     /// system (sleep, lock, user switch) can keep it in the history.
     private var readyResult: (id: UUID, result: DictationResult)?
@@ -418,9 +420,10 @@ final class DictationController {
     private func prepare(_ action: HotkeyAction) {
         guard !prepared else { return }
         prepared = true
+        // A Bluetooth microphone opens only now (see AudioCapture.start); also when the release came
+        // before the confirmation, so the grace period after it still records.
+        audio.startDeferred()
         if case .recording = phase {
-            // A Bluetooth microphone opens only now (see AudioCapture.start).
-            audio.startDeferred()
             // The Neural Engine sleeps after some idle time; wake it while the user still talks.
             let transcriber = transcriber
             Task.detached { await transcriber.prewarm() }
@@ -547,9 +550,19 @@ final class DictationController {
     }
 
     private func audioStartFailed(_ id: UUID) {
-        guard sessionID == id, case .recording = phase else { return }
+        guard sessionID == id else { return }
+        guard case .recording = phase else {
+            // Already released (a deferred Bluetooth start, a slow start): the finish reports it
+            // instead of "Nothing heard".
+            microphoneFailedSession = id
+            return
+        }
         hotkeys.reset()
         cancel()
+        showMicrophoneStartError()
+    }
+
+    private func showMicrophoneStartError() {
         if Permissions.microphoneStatus != .granted {
             showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings,
                       actionTitle: L("Open settings", "Einstellungen öffnen"))
@@ -620,10 +633,12 @@ final class DictationController {
     /// Switches to processing synchronously, so a second stop (key + button) cannot finish twice.
     private func requestFinish(_ action: HotkeyAction) {
         guard case .recording(let current) = phase, current == action else { return }
+        // Still as a recording: a release before the confirmation was processed must start the
+        // deferred microphone and the rest of prepare() like a confirmed hold.
+        if !prepared { prepare(action) }
         phase = .processing
         timing = FinishTiming(released: Date())
         previewTask?.cancel()
-        if !prepared { prepare(action) }
         finishTask = Task { await finish(action) }
     }
 
@@ -780,7 +795,9 @@ final class DictationController {
         guard sessionID == id else { return }
         timing?.textReady = Date()
         guard let result = finished else {
-            if peakLevel < 0.05 {
+            if microphoneFailedSession == id {
+                showMicrophoneStartError()
+            } else if peakLevel < 0.05 {
                 showError(L("No sound from the microphone – check the input device", "Kein Ton vom Mikrofon – Eingabegerät prüfen"),
                           action: Permissions.openMicrophoneSettings)
             } else {
@@ -947,6 +964,10 @@ final class DictationController {
         if samples.count >= 16_000 / 3 { instruction = try? await transcriber.transcribe(samples) }
         guard sessionID == id else { return }
         guard let instruction, !instruction.trimmingCharacters(in: .whitespaces).isEmpty else {
+            if microphoneFailedSession == id {
+                showMicrophoneStartError()
+                return
+            }
             overlay.show(.notice(L("Instruction not understood – please say it again", "Anweisung nicht verstanden – nochmal sprechen"), symbol: "questionmark.bubble"))
             return
         }
