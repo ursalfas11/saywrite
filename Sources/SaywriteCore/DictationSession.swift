@@ -239,10 +239,10 @@ public actor DictationSession {
             if continues, !units.isEmpty, let first = segmentUnits.first, CleanupGate.correctsPrevious(first, previous: units.last, language: language) {
                 // "am Donnerstag, | nein, am Freitag": keep apart so the correction pass below sees it. After a
                 // pause the period stays, so the text reads right if the model is off or fails.
-                if segment.continuesPrevious { units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1]) }
+                if segment.continuesPrevious { units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1], following: first) }
             } else if continues, !units.isEmpty, !segmentUnits.isEmpty {
                 // Cut mid-sentence: glue the halves back together.
-                units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1])
+                units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1], following: segmentUnits[0])
                 segmentUnits[0] = Self.lowercaseContinuation(segmentUnits[0])
                 units[units.count - 1] += " " + segmentUnits.removeFirst()
             }
@@ -356,6 +356,11 @@ public actor DictationSession {
     /// "Ich komme um fünf." + "Nein, um sechs." or "am Donnerstag" + "nein, am Freitag".
     static func joinForCorrection(_ previous: String, _ correction: String) -> String {
         guard let last = previous.last else { return correction }
+        // "am 12." + "nein, am 13.": the period of an ordinal or date is no sentence end, the comma still goes in.
+        if last == ".", let token = previous.split(whereSeparator: { $0.isWhitespace }).last,
+           RuleCleaner.isNonTerminalPeriod(token, following: Substring(correction)) {
+            return previous + ", " + correction
+        }
         return ".?!,;:".contains(last) ? previous + " " + correction : previous + ", " + correction
     }
 
@@ -395,8 +400,13 @@ public actor DictationSession {
         return !words.isEmpty && words.allSatisfy(RuleCleaner.fillerWords.contains)
     }
 
-    static func dropFalsePeriod(_ text: String) -> String {
-        text.hasSuffix(".") && !text.hasSuffix("..") ? String(text.dropLast()) : text
+    /// Drops the period the recognizer set at a cut. The period of an ordinal, a date or an abbreviation
+    /// stays ("am 15." + "um 10 Uhr", "in den U.S.A." + "und Kanada").
+    static func dropFalsePeriod(_ text: String, following: String = "") -> String {
+        guard text.hasSuffix("."), !text.hasSuffix(".."),
+              let last = text.split(whereSeparator: { $0.isWhitespace }).last,
+              !RuleCleaner.isNonTerminalPeriod(last, following: Substring(following)) else { return text }
+        return String(text.dropLast())
     }
 
     /// Words that are only capitalized because the recognizer thought a sentence started there.

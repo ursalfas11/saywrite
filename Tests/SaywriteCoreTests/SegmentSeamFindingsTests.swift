@@ -39,4 +39,37 @@ final class SegmentSeamFindingsTests: XCTestCase {
         let time = await dictate(["Wir treffen uns morgen.", "um zehn Uhr am Bahnhof."], language: "de")
         XCTAssertEqual(time?.final, "Wir treffen uns morgen um zehn Uhr am Bahnhof.")
     }
+
+    // MARK: P2 The period of an ordinal, date or abbreviation stays when segments are glued
+
+    func testDropFalsePeriodKeepsNonTerminalPeriods() {
+        XCTAssertEqual(DictationSession.dropFalsePeriod("Bitte prüfe den Bericht.", following: "und schicke ihn"), "Bitte prüfe den Bericht")
+        XCTAssertEqual(DictationSession.dropFalsePeriod("Wir treffen uns am 15.", following: "um 10 Uhr"), "Wir treffen uns am 15.")
+        XCTAssertEqual(DictationSession.dropFalsePeriod("Die Frist endet am 3.10.", following: "und nicht später"), "Die Frist endet am 3.10.")
+        XCTAssertEqual(DictationSession.dropFalsePeriod("Sie wohnt in den U.S.A.", following: "und kommt im Mai"), "Sie wohnt in den U.S.A.")
+        XCTAssertEqual(DictationSession.dropFalsePeriod("Wir treffen uns am 15.", following: "Oktober im Büro"), "Wir treffen uns am 15.")
+        // A number before a sentence start keeps its period only as the end of that sentence.
+        XCTAssertEqual(DictationSession.dropFalsePeriod("Ich komme um 5.", following: "Ich bringe Kuchen mit"), "Ich komme um 5")
+        XCTAssertEqual(DictationSession.dropFalsePeriod("Es war still...", following: "und dann"), "Es war still...")
+    }
+
+    func testGluedSegmentsKeepTheOrdinalPeriod() async {
+        let date = await dictate(["Wir treffen uns am 15.", "um 10 Uhr im Büro."])
+        XCTAssertEqual(date?.final, "Wir treffen uns am 15. um 10 Uhr im Büro.")
+        let short = await dictate(["Die Frist endet am 3.10.", "und nicht später."])
+        XCTAssertEqual(short?.final, "Die Frist endet am 3.10. und nicht später.")
+        let letters = await dictate(["Sie wohnt in den U.S.A.", "und kommt im Mai zurück."])
+        XCTAssertEqual(letters?.final, "Sie wohnt in den U.S.A. und kommt im Mai zurück.")
+        let cut = await dictate(["Wir treffen uns am 15.", "+Oktober im Büro."])
+        XCTAssertEqual(cut?.final, "Wir treffen uns am 15. Oktober im Büro.")
+        let plain = await dictate(["Bitte prüfe morgen den Bericht.", "und schicke ihn dann an das Team."])
+        XCTAssertEqual(plain?.final, "Bitte prüfe morgen den Bericht und schicke ihn dann an das Team.")
+    }
+
+    func testCorrectionAfterAnOrdinalKeepsItsComma() {
+        XCTAssertEqual(DictationSession.joinForCorrection("Wir treffen uns am 12.", "nein, am 13."), "Wir treffen uns am 12., nein, am 13.")
+        XCTAssertEqual(DictationSession.joinForCorrection("Ich komme um fünf.", "Nein, um sechs."), "Ich komme um fünf. Nein, um sechs.")
+        XCTAssertEqual(DictationSession.joinForCorrection("Ich komme um 5.", "Nein, um 6."), "Ich komme um 5. Nein, um 6.")
+        XCTAssertEqual(DictationSession.joinForCorrection("am Donnerstag", "nein, am Freitag"), "am Donnerstag, nein, am Freitag")
+    }
 }

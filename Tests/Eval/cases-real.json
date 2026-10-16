@@ -186,6 +186,24 @@
 "expected": "The report is done. We send it tomorrow."
 },
 {
+"id": "r-b2-ordinal-de",
+"style": "neutral",
+"segs": [
+"Wir treffen uns am 15.",
+"um 10 Uhr im Büro."
+],
+"expected": "Wir treffen uns am 15. um 10 Uhr im Büro."
+},
+{
+"id": "r-b2-date-de",
+"style": "neutral",
+"segs": [
+"Die Frist endet am 3.10.",
+"und nicht später."
+],
+"expected": "Die Frist endet am 3.10. und nicht später."
+},
+{
 "id": "r-b5-um",
 "style": "neutral",
 "segs": [
