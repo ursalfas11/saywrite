@@ -51,9 +51,17 @@ public struct WordPrefixGuard: Sendable {
         let words = Self.words(text)
         guard words.count <= expected.count else { return false }
         for (index, item) in words.enumerated() {
-            guard item.complete ? item.word == expected[index] : expected[index].hasPrefix(item.word) else { return false }
+            guard item.complete ? item.word == expected[index] : Self.canExtend(item.word, to: expected[index]) else { return false }
         }
         return true
+    }
+
+    /// Prefix test on the decomposed scalars, like `sameWords` compares canonically: an answer cut between
+    /// a letter and its accent ("Cafe" + U+0301, "U" + U+0308) can still become the expected word, and
+    /// precomposed and decomposed forms of a letter are the same.
+    static func canExtend(_ partial: String, to word: String) -> Bool {
+        word.decomposedStringWithCanonicalMapping.unicodeScalars
+            .starts(with: partial.decomposedStringWithCanonicalMapping.unicodeScalars)
     }
 
     private static let ignored = CharacterSet.punctuationCharacters.union(.symbols)

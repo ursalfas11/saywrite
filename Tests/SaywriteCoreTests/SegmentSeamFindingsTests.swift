@@ -89,4 +89,24 @@ final class SegmentSeamFindingsTests: XCTestCase {
         XCTAssertFalse(DictationSession.onlyFillers("Er.", language: .german))
         XCTAssertFalse(DictationSession.onlyFillers("Äh, er.", language: .german))
     }
+
+    // MARK: E3 The word guard compares accents canonically, like sameWords
+
+    func testWordGuardAcceptsDecomposedAccents() {
+        let decomposed = WordPrefixGuard(input: "Cafe\u{301} ist offen")
+        XCTAssertTrue(decomposed.allows("Café"))
+        XCTAssertTrue(decomposed.allows("Café ist"))
+        XCTAssertTrue(decomposed.allows("Cafe"))
+        let precomposed = WordPrefixGuard(input: "Café ist offen")
+        XCTAssertTrue(precomposed.allows("Cafe\u{301} "))
+        // The answer so far ends between the letter and its accent.
+        XCTAssertTrue(precomposed.allows("Cafe"))
+        XCTAssertTrue(WordPrefixGuard(input: "U\u{308}ber alles").allows("U"))
+        XCTAssertTrue(WordPrefixGuard(input: "Über alles").allows("U"))
+        XCTAssertTrue(WordPrefixGuard(input: "Über alles").allows("U\u{308}ber a"))
+        XCTAssertFalse(WordPrefixGuard(input: "Über alles").allows("Ub"))
+        XCTAssertFalse(WordPrefixGuard(input: "Über alles").allows("Uber "))
+        XCTAssertFalse(precomposed.allows("Cafe "))
+        XCTAssertTrue(LLMOutputGuard.sameWords("Cafe\u{301} ist offen", "Café ist offen."))
+    }
 }
