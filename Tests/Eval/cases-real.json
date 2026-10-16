@@ -168,6 +168,24 @@
 "expected": "The draft is done. I will check the numbers tomorrow."
 },
 {
+"id": "r-b2-neg-filler-de",
+"style": "neutral",
+"segs": [
+"Der Bericht ist fertig.",
+"ähm, ich schicke ihn morgen."
+],
+"expected": "Der Bericht ist fertig. Ich schicke ihn morgen."
+},
+{
+"id": "r-b2-neg-filler-en",
+"style": "neutral",
+"segs": [
+"The report is done.",
+"um, we send it tomorrow."
+],
+"expected": "The report is done. We send it tomorrow."
+},
+{
 "id": "r-b5-um",
 "style": "neutral",
 "segs": [

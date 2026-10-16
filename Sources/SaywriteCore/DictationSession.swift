@@ -235,7 +235,7 @@ public actor DictationSession {
             // A cut without a pause, or a pause the recognizer took for a sentence end (not when the
             // segment starts with a spoken line break).
             let continues = segment.continuesPrevious
-                || (Self.startsMidSentence(segment.raw, after: units.last) && segmentUnits.first?.hasPrefix("\n") == false)
+                || (Self.startsMidSentence(segment.raw, after: units.last, language: language) && segmentUnits.first?.hasPrefix("\n") == false)
             if continues, !units.isEmpty, let first = segmentUnits.first, CleanupGate.correctsPrevious(first, previous: units.last, language: language) {
                 // "am Donnerstag, | nein, am Freitag": keep apart so the correction pass below sees it. After a
                 // pause the period stays, so the text reads right if the model is off or fails.
@@ -368,14 +368,23 @@ public actor DictationSession {
     /// The recognizer starts every segment with a capital; one that starts lowercase after a pause
     /// continues the sentence before it ("Bitte prüfe den Bericht." | "und schicke ihn weiter."). Only
     /// after a plain period: "?", "!" and "..." end a sentence on purpose, and the period of "usw." stays.
-    /// "iPhone" or "github.com" start lowercase anyway.
-    static func startsMidSentence(_ raw: String, after previous: String?) -> Bool {
+    /// "iPhone" or "github.com" start lowercase anyway. A filler in front ("ähm, ich schicke ihn morgen.",
+    /// "um, we send it tomorrow.") marks a fresh start after the pause, not the rest of the sentence.
+    static func startsMidSentence(_ raw: String, after previous: String?, language: DictationLanguage = .german) -> Bool {
         guard let previous, previous.hasSuffix("."), !previous.hasSuffix(".."),
               let last = previous.split(whereSeparator: { $0.isWhitespace }).last,
               !RuleCleaner.abbreviations.contains(last.lowercased()),
               let first = raw.split(whereSeparator: { $0.isWhitespace }).first,
-              first.first?.isLowercase == true, !RuleCleaner.isBrandToken(first) else { return false }
+              first.first?.isLowercase == true, !RuleCleaner.isBrandToken(first),
+              !isFiller(LLMOutputGuard.words(String(first)).first ?? "", language: language) else { return false }
         return true
+    }
+
+    /// English fillers that are German words too ("um acht", "er kommt"): fillers only in English.
+    static let germanWordFillers: Set<String> = ["um", "er"]
+
+    static func isFiller(_ word: String, language: DictationLanguage) -> Bool {
+        RuleCleaner.fillerWords.contains(word) && (language == .english || !germanWordFillers.contains(word))
     }
 
     /// "Um." or "Ähm, äh." alone: a hesitation the recognizer wrote down, nothing to insert (not even the
