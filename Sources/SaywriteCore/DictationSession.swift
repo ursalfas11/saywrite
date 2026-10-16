@@ -282,7 +282,7 @@ public actor DictationSession {
 
         let raw = Self.join(spoken.map(\.raw))
         let plain = RuleCleaner.finalize(Self.join(units), style: style, language: language)
-        guard !plain.isEmpty, !Self.onlyFillers(raw) else { return nil }
+        guard !plain.isEmpty, !Self.onlyFillers(raw, language: language) else { return nil }
         let (final, replacementCount) = ReplacementEngine.apply(replacements, to: plain)
 
         let summary = ChangeSummarizer.summarize(
@@ -393,11 +393,13 @@ public actor DictationSession {
     }
 
     /// "Um." or "Ähm, äh." alone: a hesitation the recognizer wrote down, nothing to insert (not even the
-    /// period left over). Checked on what was said, since the rules remove only the fillers of one
-    /// language and the language of two letters is a guess.
-    static func onlyFillers(_ text: String) -> Bool {
+    /// period left over). Checked on what was said with the fillers of both languages, since the rules
+    /// remove only the fillers of one language and the language of two letters is a guess. "Er." is a
+    /// German answer ("Wer kommt?" – "Er."), a hesitation only in English; "Um." alone is no German
+    /// sentence either, so it stays a hesitation in both.
+    static func onlyFillers(_ text: String, language: DictationLanguage = .german) -> Bool {
         let words = LLMOutputGuard.words(text)
-        return !words.isEmpty && words.allSatisfy(RuleCleaner.fillerWords.contains)
+        return !words.isEmpty && words.allSatisfy { isFiller($0, language: language) || $0 == "um" }
     }
 
     /// Drops the period the recognizer set at a cut. The period of an ordinal, a date or an abbreviation

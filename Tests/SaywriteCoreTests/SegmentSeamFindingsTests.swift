@@ -72,4 +72,21 @@ final class SegmentSeamFindingsTests: XCTestCase {
         XCTAssertEqual(DictationSession.joinForCorrection("Ich komme um 5.", "Nein, um 6."), "Ich komme um 5. Nein, um 6.")
         XCTAssertEqual(DictationSession.joinForCorrection("am Donnerstag", "nein, am Freitag"), "am Donnerstag, nein, am Freitag")
     }
+
+    // MARK: P3 "Er." is a German answer, "Um." a hesitation in both languages
+
+    func testGermanOneWordAnswerIsNoFiller() async {
+        let german = await dictate(["Er."], language: "de")
+        XCTAssertEqual(german?.final, "Er.")
+        let english = await dictate(["Er."], language: "en")
+        XCTAssertNil(english)
+        for language in ["de", "en", "auto"] {
+            let um = await dictate(["Um."], language: language)
+            XCTAssertNil(um, language)
+        }
+        XCTAssertTrue(DictationSession.onlyFillers("Ähm, äh.", language: .german))
+        XCTAssertTrue(DictationSession.onlyFillers("Uh, er.", language: .english))
+        XCTAssertFalse(DictationSession.onlyFillers("Er.", language: .german))
+        XCTAssertFalse(DictationSession.onlyFillers("Äh, er.", language: .german))
+    }
 }
