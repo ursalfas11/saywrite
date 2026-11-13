@@ -60,7 +60,12 @@ public enum BuiltinModelState: Sendable, Equatable {
 /// The chat format of the Qwen2.5 models (ChatML), the same as the template Ollama applies.
 public enum ChatTemplate {
     public static func qwen(system: String, user: String) -> String {
-        "<|im_start|>system\n\(plain(system))<|im_end|>\n<|im_start|>user\n\(plain(user))<|im_end|>\n<|im_start|>assistant\n"
+        prefix(system: system) + "\(plain(user))<|im_end|>\n<|im_start|>assistant\n"
+    }
+
+    /// The part of the prompt that only depends on the system prompt.
+    public static func prefix(system: String) -> String {
+        "<|im_start|>system\n\(plain(system))<|im_end|>\n<|im_start|>user\n"
     }
 
     /// The engine tokenizes the whole string with control tokens enabled, so a literal `<|im_end|>` in a
@@ -84,6 +89,110 @@ public enum KVCachePlan {
         while keep < min(cached.count, tokens.count), cached[keep] == tokens[keep] { keep += 1 }
         if keep == tokens.count { keep -= 1 }
         return max(0, keep)
+    }
+}
+
+/// Saved cache states of prompt prefixes (the constant system prompts). The context holds one prompt at
+/// a time; switching between German and English or from a cleanup to a rewrite would decode the other
+/// system prompt again (450–750 ms). Restoring its saved state takes milliseconds.
+public struct PrefixSnapshots<State> {
+    public let capacity: Int
+    /// Least recently used first.
+    private var entries: [(tokens: [Int32], state: State)] = []
+
+    public init(capacity: Int) {
+        self.capacity = capacity
+    }
+
+    public var count: Int { entries.count }
+
+    public func contains(_ tokens: [Int32]) -> Bool {
+        entries.contains { $0.tokens == tokens }
+    }
+
+    /// Saves `state` for `tokens`, replacing an older state of the same prefix and dropping the least
+    /// recently used one beyond `capacity`.
+    public mutating func store(_ tokens: [Int32], _ state: State) {
+        entries.removeAll { $0.tokens == tokens }
+        entries.append((tokens, state))
+        if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
+    }
+
+    /// The longest saved prefix of `tokens` that is worth restoring: longer than the `keep` tokens the
+    /// cache shares with them already, and shorter than `tokens` (the last token must be decoded for logits).
+    public mutating func restorable(for tokens: [Int32], keep: Int) -> (tokens: [Int32], state: State)? {
+        guard let index = entries.indices
+            .filter({ entries[$0].tokens.count > keep && entries[$0].tokens.count < tokens.count && tokens.starts(with: entries[$0].tokens) })
+            .max(by: { entries[$0].tokens.count < entries[$1].tokens.count })
+        else { return nil }
+        let entry = entries.remove(at: index)
+        entries.append(entry)
+        return entry
+    }
+
+    public mutating func removeAll() {
+        entries.removeAll()
+    }
+}
+
+/// After an app or macOS update llama.cpp compiles its Metal kernels again on the first load (5–7 s),
+/// and the first dictation would run into the cleanup timeout. The app loads the model once in the
+/// background at launch instead, and remembers for which build it did.
+public enum UpdatePrewarm {
+    public static let defaultsKey = "builtinPrewarmedBuild"
+
+    /// The app version and the macOS version: either one changing invalidates the compiled kernels.
+    public static func build(appVersion: String?, systemVersion: String) -> String? {
+        appVersion.map { "\($0) / \(systemVersion)" }
+    }
+
+    public static func isNeeded(enabled: Bool, modelInstalled: Bool, build: String?, prewarmedBuild: String?) -> Bool {
+        guard enabled, modelInstalled, let build else { return false }
+        return build != prewarmedBuild
+    }
+}
+
+/// Settings of the built-in engine that depend on the Mac.
+public enum EngineTuning {
+    /// Seconds llama.cpp keeps the model's GPU memory resident after the last request, or nil for its
+    /// default (a few minutes). On a Mac with 8 GB or less the memory goes back to the system sooner.
+    public static func residencyKeepAlive(physicalMemory: UInt64) -> Int? {
+        physicalMemory <= 8 << 30 ? 30 : nil
+    }
+}
+
+/// Prompt-lookup decoding for cleanup. The answer is nearly a copy of the dictation, so the tokens that
+/// followed the last few answer tokens in the dictation are a good guess for the next ones. The model
+/// checks a whole guess in one decode step and keeps the part it would have produced itself; with greedy
+/// decoding the answer is the same as decoding one token at a time, only faster.
+public enum PromptLookup {
+    /// Tokens guessed per step. Measured on an M5 with Qwen2.5-3B: 2.1–2.8× faster decoding at 8.
+    public static let draftLength = 8
+
+    /// The tokens of `source` that followed the last `n` tokens of `generated` there, at most `limit`.
+    /// Tries n = 3, 2, 1 and, for each, the latest match in `source` first. Empty when nothing matches.
+    public static func draft(generated: [Int32], source: [Int32], limit: Int) -> [Int32] {
+        guard limit > 0 else { return [] }
+        for n in stride(from: 3, through: 1, by: -1) where generated.count >= n && source.count > n {
+            let tail = generated[(generated.count - n)...]
+            for start in stride(from: source.count - n - 1, through: 0, by: -1) where source[start..<start + n] == tail {
+                let from = start + n
+                return Array(source[from..<min(source.count, from + limit)])
+            }
+        }
+        return []
+    }
+
+    /// How many tokens of `draft` the model confirmed, and the token it predicts after them.
+    /// `prediction(i)` is the model's greedy token at batch position `i`: position 0 follows the last
+    /// accepted token, position `i + 1` follows `draft[i]`. Asked only up to the first mismatch.
+    public static func accept(draft: [Int32], isEnd: (Int32) -> Bool, prediction: (Int) -> Int32) -> (accepted: Int, next: Int32) {
+        var index = 0
+        while true {
+            let predicted = prediction(index)
+            guard index < draft.count, predicted == draft[index], !isEnd(predicted) else { return (index, predicted) }
+            index += 1
+        }
     }
 }
 

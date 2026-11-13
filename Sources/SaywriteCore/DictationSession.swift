@@ -198,7 +198,7 @@ public actor DictationSession {
             do {
                 guard !breaker.isOpen else { throw LLMError.unreachable }
                 let (lead, body) = Self.splitLeadingBreak(unit)
-                let improved = try await llm.cleanup(text: body, style: style, language: language)
+                let improved = try await llm.cleanup(text: body, style: style, language: language, keepingWords: !isCorrection)
                 Debug.log("llm: \(Debug.text(body)) -> \(Debug.text(improved))")
                 // Without a correction the model may only add punctuation; changed words fall back.
                 guard isCorrection || LLMOutputGuard.sameWords(body, improved) else { throw LLMError.rejectedOutput }

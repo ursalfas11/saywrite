@@ -129,10 +129,11 @@ public final class OllamaClient: LLMClient, @unchecked Sendable {
     /// Context sizes Ollama is asked for: a few fixed steps, because every other value reloads the model.
     static let contextSizes = [4096, 8192, 16384, 32768]
 
-    /// The smallest context that holds the prompt and the answer (estimated at two characters per
-    /// token, the answer at most as long as the prompt), nil when none does.
+    /// The smallest context that holds the prompt and the answer (estimated at three characters per
+    /// token, measured ~3.1 for the prompts with Qwen2.5; the answer at most as long as the prompt), nil
+    /// when none does. A prompt that still does not fit is caught by `parseChatResponse` (tooLong).
     static func contextSize(promptCharacters: Int, maxTokens: Int) -> Int? {
-        let prompt = promptCharacters / 2 + 64
+        let prompt = promptCharacters / 3 + 64
         let needed = prompt + min(maxTokens, prompt)
         return contextSizes.first { $0 >= needed }
     }
