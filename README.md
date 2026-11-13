@@ -111,13 +111,18 @@ flowchart LR
 
 1. Download `Saywrite-vX.Y.Z.zip` from the [latest release](https://github.com/ursalfas11/saywrite/releases/latest) and unzip it.
 2. Move `Saywrite.app` to `/Applications`.
-3. Open it. Saywrite is signed ad hoc, not notarized by Apple, so macOS blocks the first launch. Either right-click the app → **Open** → **Open**, or run once:
+3. Open it. Saywrite is signed ad hoc, not notarized by Apple, so macOS blocks the first launch. On macOS 15 and later the right-click → **Open** shortcut no longer works: try to open the app once, then go to **System Settings › Privacy & Security**, scroll down to the message about Saywrite and click **Open Anyway**. On macOS 14, right-click the app → **Open** → **Open**. Or, on any version, run once:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/Saywrite.app
    ```
 
-Each release lists the SHA-256 of the zip next to it.
+Each release lists the SHA-256 of the zip next to it, and the zip carries a signed build provenance attestation. To verify a download (replace `vX.Y.Z`):
+
+```bash
+shasum -a 256 -c Saywrite-vX.Y.Z.zip.sha256
+gh attestation verify Saywrite-vX.Y.Z.zip -R ursalfas11/saywrite
+```
 
 **Signing trade-off.** The app is signed ad hoc with a requirement on the bundle identifier (`dev.saywrite.app`) only, so macOS keeps the Accessibility and Microphone permissions when you update or rebuild. The flip side: macOS trusts any binary that carries that identifier, so other code running as your user could sign itself the same way and inherit those permissions. Closing this needs a Developer ID certificate (team-bound requirement, hardened runtime, notarization), which is on the roadmap. Until then, install Saywrite only from this repository's releases or your own build, and verify the SHA-256.
 

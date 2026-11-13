@@ -320,7 +320,8 @@ Models downloaded at first launch (not bundled)
 ================================================================
 
 - Parakeet Ultra Core ML (FluidInference/parakeet-ultra-coreml), based on
-  moondream/parakeet-ultra and nvidia/parakeet-tdt-0.6b-v3. License: CC BY 4.0
+  moondream/parakeet-ultra and nvidia/parakeet-tdt-0.6b-v3 (converted to Core ML; changes: format
+  conversion only). License: CC BY 4.0
   https://creativecommons.org/licenses/by/4.0/
 - Silero VAD Core ML (FluidInference/silero-vad-coreml). License: MIT
 - The built-in language model, Qwen2.5-3B-Instruct (Q4_K_M GGUF by bartowski,

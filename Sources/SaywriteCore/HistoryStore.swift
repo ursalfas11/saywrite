@@ -81,6 +81,11 @@ public final class HistoryStore: @unchecked Sendable {
             guard FileManager.default.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
                 return
             }
+            // Private dictations stay out of Time Machine and other backups (the flag travels with the rename).
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var tempURL = temp
+            try? tempURL.setResourceValues(values)
             // rename(2) replaces the old file atomically and keeps the mode of the temporary one.
             if rename(temp.path, fileURL.path) != 0 { try? FileManager.default.removeItem(at: temp) }
         } catch {

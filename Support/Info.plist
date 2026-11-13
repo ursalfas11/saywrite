@@ -34,6 +34,13 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Saywrite records your voice to turn it into text, locally on your Mac.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>MIT License</string>
+	<string>Copyright © 2026 The Saywrite contributors. MIT License.</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
