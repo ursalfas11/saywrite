@@ -58,6 +58,8 @@ final class DictationController {
     private var segmenter: Segmenter?
     private var chunkStream: AsyncStream<[Float]>.Continuation?
     private var chunkConsumer: Task<Void, Never>?
+    /// The microphone starts off the main thread; `false` once it failed (already cleaned up then).
+    private var audioStart: Task<Bool, Never>?
     private var selectionTask: Task<String?, Never>?
     private var errorAction: (() -> Void)?
     private var prepared = false
@@ -398,6 +400,13 @@ final class DictationController {
             return
         }
 
+        // An earlier start is still stuck in Core Audio: say so right away instead of waiting again.
+        guard !audio.isStuck else {
+            hotkeys.reset()
+            showMicrophoneError(AudioCaptureError.notResponding)
+            return
+        }
+
         sessionID = UUID()
         secureFieldSeen = false
         sessionApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -427,21 +436,22 @@ final class DictationController {
             }
         }
         audio.setSampleHandler { chunk in continuation.yield(chunk) }
-        audio.preferredDeviceUID = settings.inputDeviceUID.isEmpty ? nil : settings.inputDeviceUID
 
-        do {
-            try audio.start()
-        } catch {
-            audio.setSampleHandler(nil)
-            continuation.finish()
-            teardown()
-            hotkeys.reset()
-            if Permissions.microphoneStatus != .granted {
-                showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings)
-            } else {
-                showError(L("Microphone could not start", "Mikrofon konnte nicht starten"), action: nil)
+        // Core Audio can hang (12.11.2026: hours inside `AVAudioEngine.inputNode` after a device
+        // change). The start therefore runs off the main thread with a deadline, so hotkeys and the
+        // panel keep working; the session counts as recording meanwhile and samples arrive once the
+        // microphone is open.
+        let id = sessionID
+        let deviceUID = settings.inputDeviceUID.isEmpty ? nil : settings.inputDeviceUID
+        let audio = self.audio
+        audioStart = Task { [weak self] in
+            do {
+                try await audio.start(deviceUID: deviceUID)
+                return true
+            } catch {
+                self?.audioStartFailed(error, id: id)
+                return false
             }
-            return
         }
         phase = .recording(action)
         recordingStart = Date()
@@ -452,6 +462,45 @@ final class DictationController {
         // Right ⌥ is also used for @, € and brackets: the panel and sound only appear once it is
         // clearly a dictation (tap for hands-free, or held past the shortcut window).
         startPreview(session: session, segmenter: segmenter, id: sessionID)
+    }
+
+    private func audioStartFailed(_ error: Error, id: UUID) {
+        Debug.log("audio start failed: \(error)")
+        guard sessionID == id else { return }
+        let active: Bool
+        if case .idle = phase { active = false } else { active = true }
+        if active {
+            hotkeys.reset()
+            cancel()
+        }
+        // A cancelled ⌥ shortcut stays quiet, unless the microphone hangs: that does not go away by itself.
+        if active || isNotResponding(error) { showMicrophoneError(error) }
+    }
+
+    private func isNotResponding(_ error: Error) -> Bool {
+        if case AudioCaptureError.notResponding = error { return true }
+        return false
+    }
+
+    private func showMicrophoneError(_ error: Error) {
+        if isNotResponding(error) {
+            showError(
+                L("Microphone not responding – click to restart Saywrite", "Mikrofon antwortet nicht – klicken, um Saywrite neu zu starten"),
+                action: Self.relaunch)
+        } else if Permissions.microphoneStatus != .granted {
+            showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings)
+        } else {
+            showError(L("Microphone could not start", "Mikrofon konnte nicht starten"), action: nil)
+        }
+    }
+
+    /// A thread stuck in Core Audio cannot be stopped from inside the process; a fresh start clears it.
+    private static func relaunch() {
+        let reopen = Process()
+        reopen.executableURL = URL(fileURLWithPath: "/bin/sh")
+        reopen.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        try? reopen.run()
+        NSApp.terminate(nil)
     }
 
     private func showRecordingOverlay(_ action: HotkeyAction, handsFree: Bool) {
@@ -510,7 +559,7 @@ final class DictationController {
 
     private func cancel() {
         previewTask?.cancel()
-        audio.stop()
+        audio.stopInBackground()
         audio.setSampleHandler(nil)
         chunkStream?.finish()
         chunkConsumer?.cancel()
@@ -528,7 +577,9 @@ final class DictationController {
         overlay.show(.processing)
         // Keep recording a moment so the last syllable is not cut off.
         try? await Task.sleep(nanoseconds: 150_000_000)
-        let allSamples = audio.stop()
+        // The microphone failed to start: audioStartFailed() has cleaned up and shown the error.
+        if let audioStart, !(await audioStart.value) { return }
+        let allSamples = await audio.stop()
         audio.setSampleHandler(nil)
         chunkStream?.finish()
         await chunkConsumer?.value
@@ -722,6 +773,7 @@ final class DictationController {
         segmenter = nil
         chunkStream = nil
         chunkConsumer = nil
+        audioStart = nil
         selectionTask = nil
         secureProbeTask = nil
         previewTask = nil
