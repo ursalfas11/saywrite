@@ -58,9 +58,10 @@ final class ChangeSummarizerTests: XCTestCase {
         let s = ChangeSummarizer.summarize(
             raw: "ähm ich komme äh morgen", final: "Ich komme morgen.", usedLLM: false, llmFailed: false)
         XCTAssertEqual(s.fillersRemoved, 2)
-        XCTAssertEqual(s.punctuationChanged, 1)
+        // The period and the capital of "Ich".
+        XCTAssertEqual(s.punctuationChanged, 2)
         XCTAssertEqual(s.wordsChanged, 0)
-        XCTAssertEqual(s.text, "2 Füllwörter · 1 Satzzeichen")
+        XCTAssertEqual(s.text, "2 Füllwörter · 2 Satzzeichen")
     }
 
     func testLLMCorrection() {
