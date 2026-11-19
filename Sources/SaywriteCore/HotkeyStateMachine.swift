@@ -33,6 +33,8 @@ public struct HotkeyStateMachine: Sendable {
     public private(set) var confirmed = false
     /// A key was pressed or clicked after the confirmation; decided on release (see `triggerUp`).
     private var keyAfterConfirmation = false
+    /// Tap or hold, push to talk, or on/off. Read on every release, so a change applies to the next one.
+    public var mode: TriggerMode = .tapOrHold
 
     public init(minimumHold: TimeInterval = 0.3, lateShortcutWindow: TimeInterval = 1.5) {
         self.minimumHold = minimumHold
@@ -138,11 +140,24 @@ public struct HotkeyStateMachine: Sendable {
             return []
         }
         if held >= minimumHold {
-            active = nil
             // A key or click during the hold and a release soon after: a slowly typed shortcut (⌥ held
             // a moment, then L for @; a ⌘-click), not a dictation. A long recording with a stray key is kept.
-            if keyAfterConfirmation, held < lateShortcutWindow { return [.cancel(action)] }
+            if keyAfterConfirmation, held < lateShortcutWindow {
+                active = nil
+                return [.cancel(action)]
+            }
+            // On/off: releasing after a hold does not finish, the next press does.
+            if mode == .tapOnly {
+                handsFree = true
+                return [.handsFree(action)]
+            }
+            active = nil
             return [.end(action)]
+        }
+        // Push to talk: a short tap is no dictation, the recording that started on key down is dropped.
+        if mode == .holdOnly {
+            active = nil
+            return [.cancel(action)]
         }
         // Short tap: the recording that started on key down simply continues hands-free.
         handsFree = true

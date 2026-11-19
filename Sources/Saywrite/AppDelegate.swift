@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .failed: lines.append((L("Speech model error", "Sprachmodell-Fehler"), true))
         case .ready:
             if lines.isEmpty {
-                lines.append((L("Ready – tap \(settings.dictateKey.displayName)", "Bereit – \(settings.dictateKey.displayName) tippen"), false))
+                lines.append((settings.dictateKey.readyLine(mode: settings.triggerMode), false))
             }
         }
         if settings.aiEnabled, let aiProblem { lines.append((aiProblem, true)) }
