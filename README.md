@@ -44,6 +44,7 @@ Most dictation apps run every sentence you say through a language model. That is
 | | |
 |---|---|
 | **Tap or hold** | Tap right ⌥ to start, tap again to insert. Or hold it and release. **Esc** cancels. A soft sound marks start and stop. |
+| **Your keys** | Pick any trigger in the settings: a modifier on its own (right ⌥/⌘/⌃/⇧, fn, the left ones), a combination like ⌃⌥D or ⌥Space, F1–F20, or the middle or a side mouse button. Choose *tap or hold*, *hold only* (push to talk) or *tap only* (on/off). Pasting the last dictation can get its own shortcut, and rewriting can be switched off. |
 | **Out of the way** | While you speak, a small pill at the bottom of the screen shows only the stop button and your level. The words appear where they are inserted, not in a preview. |
 | **Self-corrections** | "I'll be there at 5, no, at 6" → *I'll be there at 6.* "We could order pizza. Actually, scratch that, let's cook." → *Let's cook.* This also works across a pause. |
 | **Rewrite by voice** | Select text, tap right ⌘ and say "more formal", "shorter" or "in German". |
@@ -158,12 +159,12 @@ On first launch Saywrite also asks for **Microphone** and **Accessibility** acce
 
 | Action | How |
 |---|---|
-| Dictate | Tap **right ⌥**, speak, tap again (or hold and release) |
+| Dictate | Tap **right ⌥**, speak, tap again (or hold and release). The key and its behaviour can be changed in the settings. |
 | Stop | Tap again, or click the red button in the pill |
 | Cancel | **Esc** |
 | Undo the AI | Click **↩ Original** right after inserting (offered in text fields where undo is reliable) |
 | Rewrite a selection | Select text, tap **right ⌘**, speak the instruction, tap again |
-| Paste the last dictation | Menu bar icon → *Paste last dictation* |
+| Paste the last dictation | Menu bar icon → *Paste last dictation*, or a shortcut of your choice (Settings → General → Keys) |
 
 Everything else is in the menu bar icon → **Settings**: keys, microphone, language, models, styles per app, dictionary and history. The interface, including the permission prompts, follows your system language (English or German).
 
