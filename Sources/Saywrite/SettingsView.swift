@@ -102,12 +102,8 @@ private struct SetupTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section(L("How it works", "So geht's")) {
-                Text(LM("Tap **\(settings.dictateKey.displayName)**, speak, tap again – the text is inserted.",
-                        "**\(settings.dictateKey.displayName)** einmal tippen, sprechen, nochmal tippen = Text wird eingefügt."))
-                Text(LM("Or hold it and release when you are done. **Esc** cancels.",
-                        "Oder gedrückt halten und loslassen, wenn du fertig bist. **Esc** bricht ab."))
-                Text(LM("Select text, tap **\(settings.rewriteKey.displayName)**, say what should change, tap again.",
-                        "Text markieren, **\(settings.rewriteKey.displayName)** tippen, sagen, was sich ändern soll, nochmal tippen."))
+                let lines = Hotkey.howItWorks(dictate: settings.dictateKey, rewrite: settings.rewriteKey, mode: settings.triggerMode)
+                ForEach(lines.indices, id: \.self) { Text(lines[$0]) }
             }
         }
         .formStyle(.grouped)
@@ -313,19 +309,50 @@ private struct GeneralTab: View {
         !settings.inputDeviceUID.isEmpty && !microphones.contains { $0.id == settings.inputDeviceUID }
     }
 
-    private var fnKeyChosen: Bool { settings.dictateKey == .fn || settings.rewriteKey == .fn }
+    private var boundKeys: [Hotkey?] { [settings.dictateKey, settings.rewriteKey, settings.pasteLastKey] }
+    private var fnKeyChosen: Bool { boundKeys.contains(.modifier(.fn)) }
+    /// Left ⌘, ⌃ and ⇧ are held for shortcuts all day.
+    private var busyModifierChosen: Bool {
+        boundKeys.contains { [.leftCommand, .leftControl, .leftShift].contains($0?.modifierKey) }
+    }
+
+    private var modeCaption: String {
+        switch settings.triggerMode {
+        case .tapOrHold:
+            return L("Tap to start, tap again to finish. Holding and releasing works too. Esc cancels.",
+                     "Einmal tippen startet, nochmal tippen beendet. Halten und Loslassen geht auch. Esc bricht ab.")
+        case .holdOnly:
+            return L("Records only while the key is held. A short tap does nothing. Esc cancels.",
+                     "Nimmt nur auf, solange die Taste gehalten wird. Kurz tippen tut nichts. Esc bricht ab.")
+        case .tapOnly:
+            return L("Every press starts or finishes, however long it is held. Esc cancels.",
+                     "Jeder Druck startet oder beendet, egal wie lange gehalten. Esc bricht ab.")
+        }
+    }
 
     var body: some View {
         Form {
             Section(L("Keys", "Tasten")) {
-                Picker(L("Dictate", "Diktieren"), selection: $settings.dictateKey) {
-                    ForEach(TriggerKey.allCases) { Text($0.displayName).tag($0) }
+                LabeledContent(L("Dictate", "Diktieren")) {
+                    HotkeyField(slot: .dictate, settings: settings, controller: controller)
                 }
-                Picker(L("Rewrite selection", "Umformulieren"), selection: $settings.rewriteKey) {
-                    ForEach(TriggerKey.allCases.filter { $0 != settings.dictateKey }) { Text($0.displayName).tag($0) }
+                LabeledContent(L("Rewrite selection", "Umformulieren")) {
+                    HotkeyField(slot: .rewrite, settings: settings, controller: controller)
                 }
-                Text(L("Tap to start, tap again to finish. Holding and releasing works too.", "Einmal tippen startet, nochmal tippen beendet. Halten und Loslassen geht auch."))
-                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent(L("Paste last dictation", "Letztes Diktat einfügen")) {
+                    HotkeyField(slot: .pasteLast, settings: settings, controller: controller)
+                }
+                Picker(L("Key behaviour", "Tastenverhalten"), selection: $settings.triggerMode) {
+                    Text(L("Tap or hold", "Tippen oder halten")).tag(TriggerMode.tapOrHold)
+                    Text(L("Hold only (push to talk)", "Nur halten (Push-to-Talk)")).tag(TriggerMode.holdOnly)
+                    Text(L("Tap only (on/off)", "Nur tippen (an/aus)")).tag(TriggerMode.tapOnly)
+                }
+                Text(modeCaption).font(.caption).foregroundStyle(.secondary)
+                if busyModifierChosen {
+                    Text(L("Left ⌘, ⌃ and ⇧ are held for shortcuts all the time. Quick shortcuts are recognised, but holding the key a while can start a recording.",
+                           "Linke ⌘, ⌃ und ⇧ werden ständig für Kürzel gehalten. Schnelle Kürzel erkennt Saywrite, längeres Halten kann aber eine Aufnahme starten."))
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 if fnKeyChosen {
                     // Otherwise macOS also reacts to the key (emoji picker, its own dictation).
                     VStack(alignment: .leading, spacing: 4) {
@@ -382,12 +409,7 @@ private struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: settings.dictateKey) { _, key in
-            if settings.rewriteKey == key {
-                settings.rewriteKey = TriggerKey.allCases.first { $0 != key } ?? .rightCommand
-            }
-            controller.applySettings()
-        }
+        .onChange(of: settings.triggerMode) { _, _ in controller.applySettings() }
         .onChange(of: settings.ollamaURL) { _, _ in
             // Wait until typing pauses: no request per keystroke to half-typed addresses.
             urlRefresh?.cancel()
@@ -400,7 +422,6 @@ private struct GeneralTab: View {
         // The window is kept between openings: pick up new microphones and a changed login item.
         .onAppear(perform: refreshSystemState)
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in refreshSystemState() }
-        .onChange(of: settings.rewriteKey) { _, _ in controller.applySettings() }
         .onChange(of: settings.language) { _, _ in controller.applySettings() }
         .onChange(of: settings.ollamaModel) { _, _ in Task { await controller.refreshOllamaStatus() } }
         .onChange(of: settings.llmBackend) { _, _ in controller.backendChanged() }

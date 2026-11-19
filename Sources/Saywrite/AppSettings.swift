@@ -1,32 +1,10 @@
 import Foundation
 import SaywriteCore
 
-/// Keys that can be held alone as a dictation trigger.
-enum TriggerKey: String, CaseIterable, Identifiable {
-    case rightOption
-    case rightCommand
-    case rightControl
-    case fn
-
-    var id: String { rawValue }
-
-    var keyCode: UInt16 {
-        switch self {
-        case .rightOption: return 61
-        case .rightCommand: return 54
-        case .rightControl: return 62
-        case .fn: return 63
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .rightOption: return L("Right ⌥ Option", "Rechte ⌥ Option")
-        case .rightCommand: return L("Right ⌘ Command", "Rechte ⌘ Command")
-        case .rightControl: return L("Right ⌃ Control", "Rechte ⌃ Control")
-        case .fn: return "fn / 🌐"
-        }
-    }
+/// The actions a key can be bound to.
+enum HotkeySlot: CaseIterable, Identifiable {
+    case dictate, rewrite, pasteLast
+    var id: Self { self }
 }
 
 /// User preferences, persisted in UserDefaults.
@@ -34,8 +12,14 @@ enum TriggerKey: String, CaseIterable, Identifiable {
 final class AppSettings: ObservableObject {
     private let defaults = UserDefaults.standard
 
-    @Published var dictateKey: TriggerKey { didSet { defaults.set(dictateKey.rawValue, forKey: "dictateKey") } }
-    @Published var rewriteKey: TriggerKey { didSet { defaults.set(rewriteKey.rawValue, forKey: "rewriteKey") } }
+    /// What starts a dictation: a modifier on its own, a key combination or a mouse button.
+    @Published var dictateKey: Hotkey { didSet { storeHotkey(dictateKey, forKey: "dictateHotkey", legacyKey: "dictateKey") } }
+    /// What starts a rewrite of the selection. nil: rewriting by voice is off.
+    @Published var rewriteKey: Hotkey? { didSet { storeHotkey(rewriteKey, forKey: "rewriteHotkey", legacyKey: "rewriteKey") } }
+    /// Pastes the last dictation again. nil: only through the menu.
+    @Published var pasteLastKey: Hotkey? { didSet { storeHotkey(pasteLastKey, forKey: "pasteLastHotkey", legacyKey: nil) } }
+    /// Tap or hold, push to talk, or on/off; the same for both trigger keys.
+    @Published var triggerMode: TriggerMode { didSet { defaults.set(triggerMode.rawValue, forKey: "triggerMode") } }
     @Published var language: String { didSet { defaults.set(language, forKey: "language") } }
     @Published var aiEnabled: Bool { didSet { defaults.set(aiEnabled, forKey: "aiEnabled") } }
     /// Which engine does the AI cleanup: the built-in model (default) or an Ollama server.
@@ -62,8 +46,17 @@ final class AppSettings: ObservableObject {
     }
 
     init() {
-        dictateKey = TriggerKey(rawValue: defaults.string(forKey: "dictateKey") ?? "") ?? .rightOption
-        rewriteKey = TriggerKey(rawValue: defaults.string(forKey: "rewriteKey") ?? "") ?? .rightCommand
+        let store0 = UserDefaults.standard
+        // Earlier versions stored one of four modifier names under "dictateKey" / "rewriteKey".
+        dictateKey = Self.loadHotkey(store0, key: "dictateHotkey")
+            ?? Hotkey(legacy: store0.string(forKey: "dictateKey") ?? "") ?? .defaultDictate
+        if store0.object(forKey: "rewriteHotkey") != nil {
+            rewriteKey = Self.loadHotkey(store0, key: "rewriteHotkey")
+        } else {
+            rewriteKey = Hotkey(legacy: store0.string(forKey: "rewriteKey") ?? "") ?? .defaultRewrite
+        }
+        pasteLastKey = Self.loadHotkey(store0, key: "pasteLastHotkey")
+        triggerMode = TriggerMode(rawValue: store0.string(forKey: "triggerMode") ?? "") ?? .tapOrHold
         language = defaults.string(forKey: "language") ?? "auto"
         aiEnabled = defaults.object(forKey: "aiEnabled") as? Bool ?? true
         let storedBackend = defaults.string(forKey: "llmBackend")
@@ -96,6 +89,39 @@ final class AppSettings: ObservableObject {
             styleMap = map
         } else {
             styleMap = StyleMap()
+        }
+    }
+
+    /// Stored as JSON; "off" is stored as JSON null, so it is not mistaken for "never set".
+    private func storeHotkey(_ hotkey: Hotkey?, forKey key: String, legacyKey: String?) {
+        defaults.set(try? JSONEncoder().encode(hotkey), forKey: key)
+        // An earlier version, if the user goes back to it, keeps the key when it knows it.
+        if let legacyKey, let name = hotkey?.legacyName { defaults.set(name, forKey: legacyKey) }
+    }
+
+    private static func loadHotkey(_ store: UserDefaults, key: String) -> Hotkey? {
+        guard let data = store.data(forKey: key) else { return nil }
+        return (try? JSONDecoder().decode(Hotkey?.self, from: data)) ?? nil
+    }
+
+    /// The bindings of the other actions, to refuse a key that is already taken.
+    func hotkeysOtherThan(_ slot: HotkeySlot) -> [Hotkey?] {
+        HotkeySlot.allCases.filter { $0 != slot }.map { hotkey(for: $0) }
+    }
+
+    func hotkey(for slot: HotkeySlot) -> Hotkey? {
+        switch slot {
+        case .dictate: return dictateKey
+        case .rewrite: return rewriteKey
+        case .pasteLast: return pasteLastKey
+        }
+    }
+
+    func setHotkey(_ hotkey: Hotkey?, for slot: HotkeySlot) {
+        switch slot {
+        case .dictate: if let hotkey { dictateKey = hotkey }
+        case .rewrite: rewriteKey = hotkey
+        case .pasteLast: pasteLastKey = hotkey
         }
     }
 

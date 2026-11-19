@@ -105,7 +105,9 @@ final class DictationController {
         self.state = state
         self.overlay = overlay
         self.history = history
-        self.hotkeys = HotkeyMonitor(dictateKey: settings.dictateKey, rewriteKey: settings.rewriteKey)
+        self.hotkeys = HotkeyMonitor(
+            dictateKey: settings.dictateKey, rewriteKey: settings.rewriteKey,
+            pasteLastKey: settings.pasteLastKey, mode: settings.triggerMode)
         // Dictations do not stay on disk indefinitely.
         history.removeOlder(than: Self.historyRetention)
         state.history = history.items
@@ -113,6 +115,7 @@ final class DictationController {
         hotkeys.onEvent = { [weak self] event in self?.handle(event) }
         hotkeys.onProcessingEscape = { [weak self] in self?.cancelProcessing() }
         hotkeys.onKeyDown = { [weak self] event in self?.userPressedKey(event) }
+        hotkeys.onPasteLast = { [weak self] in self?.pasteLast() }
         overlay.onStop = { [weak self] in self?.stopFromOverlay() }
         overlay.onUndo = { [weak self] in self?.insertOriginal() }
         overlay.onCancel = { [weak self] in self?.cancelFromOverlay() }
@@ -331,8 +334,9 @@ final class DictationController {
     }
 
     func applySettings() {
-        hotkeys.dictateKey = settings.dictateKey
-        hotkeys.rewriteKey = settings.rewriteKey
+        hotkeys.configure(
+            dictateKey: settings.dictateKey, rewriteKey: settings.rewriteKey,
+            pasteLastKey: settings.pasteLastKey, mode: settings.triggerMode)
         Task { await transcriber.setLanguage(settings.language) }
     }
 
@@ -342,6 +346,11 @@ final class DictationController {
     }
 
     var hotkeysActive: Bool { hotkeys.isRunning }
+
+    /// While a key is recorded in the settings, the triggers must not fire.
+    func setHotkeysSuspended(_ suspended: Bool) {
+        hotkeys.isSuspended = suspended
+    }
 
     // MARK: - Events
 
