@@ -73,10 +73,28 @@ enum AudioDevices {
     }
 }
 
+enum AudioCaptureError: LocalizedError {
+    case noMicrophone, unsupportedFormat
+    /// Core Audio did not answer in time. The call may still hang in the background.
+    case notResponding
+
+    var errorDescription: String? {
+        switch self {
+        case .noMicrophone: return "Kein Mikrofon gefunden"
+        case .unsupportedFormat: return "Audioformat nicht unterstützt"
+        case .notResponding: return "Core Audio antwortet nicht"
+        }
+    }
+}
+
 /// Records a microphone into memory as 16 kHz mono Float32.
 /// The engine is started and stopped on a serial queue, never on the main thread: opening an input
 /// can take a few hundred ms (Bluetooth), and the main thread also serves the event tap that every
 /// key press of the user waits for. Chunks and levels are delivered on the audio thread via the callbacks.
+///
+/// Every job on that queue has a deadline. When Core Audio stops answering (seen on 12.11.2026:
+/// `inputNode` spun for hours inside the HAL after a device change), the caller gets `.notResponding`
+/// instead of waiting with it, and later starts fail fast until the stuck call returns.
 final class AudioCapture: @unchecked Sendable {
     static let sampleRate: Double = 16_000
 
@@ -92,6 +110,10 @@ final class AudioCapture: @unchecked Sendable {
         commonFormat: .pcmFormatFloat32, sampleRate: AudioCapture.sampleRate, channels: 1, interleaved: false)!
     private var configObserver: NSObjectProtocol?
 
+    /// Starting normally takes well under a second; a Bluetooth device may need a moment longer.
+    static let startTimeout: TimeInterval = 5
+    static let stopTimeout: TimeInterval = 1
+
     // Only touched on `queue`.
     private var engine: AVAudioEngine?
     /// Which device the engine was built for ("default" or a UID, plus the device it resolved to).
@@ -101,7 +123,7 @@ final class AudioCapture: @unchecked Sendable {
     private var running = false
     private var currentUID: String?
     /// A Bluetooth start that waits for `startDeferred()`.
-    private var deferred: (generation: Int, uid: String?, keepSamples: Bool, onFailure: @MainActor () -> Void)?
+    private var deferred: (generation: Int, uid: String?, keepSamples: Bool)?
 
     // Guarded by `lock`.
     private let lock = NSLock()
@@ -109,6 +131,10 @@ final class AudioCapture: @unchecked Sendable {
     private var keepSamples = false
     /// Bumped by every start and stop: a queued start that finds it changed was overtaken by a stop.
     private var generation = 0
+    /// The failure handler of the latest `start`, also used by its deferred Bluetooth start.
+    private var onFailure: (@MainActor (Error) -> Void)?
+    /// Number of queue jobs that ran past their deadline and have not returned yet.
+    private var overdueJobs = 0
 
     init() {
         configObserver = NotificationCenter.default.addObserver(
@@ -116,7 +142,8 @@ final class AudioCapture: @unchecked Sendable {
         ) { [weak self] note in
             guard let self else { return }
             let source = (note.object as AnyObject?).map(ObjectIdentifier.init)
-            self.queue.async { self.configurationChanged(source) }
+            // A restart that hangs in Core Audio counts as stuck like any other job.
+            self.runWithDeadline(Self.startTimeout, { self.configurationChanged(source) }, completion: { _ in })
         }
     }
 
@@ -130,49 +157,68 @@ final class AudioCapture: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// `true` while an earlier call into Core Audio is still stuck on the audio queue.
+    var isStuck: Bool { lock.withLock { overdueJobs > 0 } }
+
     /// Starts recording in the background and returns at once. `keepSamples`: also collect the whole
     /// recording for `stop()` (only rewrite needs it; dictation gets the chunks). `deferBluetooth`:
     /// a Bluetooth microphone only opens with `startDeferred()`, once it is clearly a dictation and
     /// not a ⌥ shortcut, because opening it degrades the headset's sound. A built-in microphone starts
-    /// at once, so the first word is not lost. `onFailure` runs on the main thread.
-    func start(deviceUID: String?, keepSamples: Bool, deferBluetooth: Bool, onFailure: @escaping @MainActor () -> Void) {
+    /// at once, so the first word is not lost. `onFailure` runs on the main thread, at most once per
+    /// start, with `AudioCaptureError.notResponding` when Core Audio did not answer within `startTimeout`.
+    func start(deviceUID: String?, keepSamples: Bool, deferBluetooth: Bool, onFailure: @escaping @MainActor (Error) -> Void) {
         lock.lock()
         generation += 1
         let current = generation
+        self.onFailure = onFailure
+        let stuck = overdueJobs > 0
         lock.unlock()
-        queue.async { [self] in
-            guard isCurrent(current) else { return }
+        // Do not queue behind a call that never returned: the user would wait forever.
+        guard !stuck else {
+            Self.reportError(AudioCaptureError.notResponding, to: onFailure)
+            return
+        }
+        runWithDeadline(Self.startTimeout, { [self] () -> Error? in
+            guard isCurrent(current) else { return nil }
             deferred = nil
             if deferBluetooth, let device = Self.resolve(deviceUID).device, AudioDevices.isBluetooth(device) {
                 Debug.log("bluetooth microphone: start waits for the confirmation")
-                deferred = (current, deviceUID, keepSamples, onFailure)
-                return
+                deferred = (current, deviceUID, keepSamples)
+                return nil
             }
-            startOnQueue(uid: deviceUID, keepSamples: keepSamples, onFailure: onFailure)
-        }
+            return startOnQueue(uid: deviceUID, keepSamples: keepSamples)
+        }, completion: { result in
+            Self.report(result, to: onFailure)
+        })
     }
 
     /// Opens a Bluetooth microphone that `start` held back. Does nothing otherwise.
     func startDeferred() {
-        queue.async { [self] in
-            guard let pending = deferred, isCurrent(pending.generation) else { return }
+        let onFailure = lock.withLock { self.onFailure }
+        runWithDeadline(Self.startTimeout, { [self] () -> Error? in
+            guard let pending = deferred, isCurrent(pending.generation) else { return nil }
             deferred = nil
-            startOnQueue(uid: pending.uid, keepSamples: pending.keepSamples, onFailure: pending.onFailure)
-        }
+            return startOnQueue(uid: pending.uid, keepSamples: pending.keepSamples)
+        }, completion: { result in
+            if let onFailure { Self.report(result, to: onFailure) }
+        })
     }
 
-    /// Stops recording and returns what was kept since `start` (empty unless `keepSamples`).
+    /// Stops recording and returns what was kept since `start` (empty unless `keepSamples`). Never
+    /// waits longer than `stopTimeout`: what was kept until then is returned even if Core Audio hangs.
     func stop() async -> [Float] {
         invalidate()
         return await withCheckedContinuation { continuation in
-            queue.async { [self] in continuation.resume(returning: stopOnQueue()) }
+            runWithDeadline(Self.stopTimeout, { [self] in stopOnQueue() }, completion: { [self] kept in
+                continuation.resume(returning: kept ?? lock.withLock { samples })
+            })
         }
     }
 
     /// Stops recording and throws the audio away.
     func discard() {
         invalidate()
-        queue.async { [self] in _ = stopOnQueue() }
+        runWithDeadline(Self.stopTimeout, { [self] in _ = stopOnQueue() }, completion: { _ in })
     }
 
     private func invalidate() {
@@ -187,14 +233,66 @@ final class AudioCapture: @unchecked Sendable {
         return generation == value
     }
 
+    /// Delivers the outcome of a start job on the main thread: `nil` (deadline passed) is reported as
+    /// `.notResponding`, a returned error as itself, success not at all.
+    private static func report(_ result: Error??, to onFailure: @escaping @MainActor (Error) -> Void) {
+        let error: Error
+        switch result {
+        case .none: error = AudioCaptureError.notResponding
+        case .some(.some(let failure)): error = failure
+        case .some(.none): return
+        }
+        reportError(error, to: onFailure)
+    }
+
+    private static func reportError(_ error: Error, to onFailure: @escaping @MainActor (Error) -> Void) {
+        DispatchQueue.main.async { MainActor.assumeIsolated { onFailure(error) } }
+    }
+
+    /// Runs `work` on the audio queue and calls `completion` exactly once: with its result, or with
+    /// nil when `timeout` passed first. A job past its deadline keeps running (a thread stuck in Core
+    /// Audio cannot be interrupted) and counts as overdue, so `isStuck` is true until it returns.
+    private func runWithDeadline<T>(_ timeout: TimeInterval, _ work: @escaping () -> T, completion: @escaping (T?) -> Void) {
+        let state = JobState()
+        queue.async { [self] in
+            let result = work()
+            let first = lock.withLock { () -> Bool in
+                state.finished = true
+                guard state.timedOut else { return true }
+                overdueJobs -= 1
+                return false
+            }
+            if first { completion(result) }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [self] in
+            let first = lock.withLock { () -> Bool in
+                guard !state.finished else { return false }
+                state.timedOut = true
+                overdueJobs += 1
+                return true
+            }
+            guard first else { return }
+            Debug.log("audio: Core Audio did not answer within \(timeout) s")
+            completion(nil)
+        }
+    }
+
+    /// Who got there first: the job or its deadline. Guarded by `lock`.
+    private final class JobState: @unchecked Sendable {
+        var finished = false
+        var timedOut = false
+    }
+
     /// The device a recording would use: the chosen one if present, else the system default.
     private static func resolve(_ uid: String?) -> (device: AudioDeviceID?, explicit: Bool) {
         if let uid, let device = AudioDevices.deviceID(forUID: uid) { return (device, true) }
         return (AudioDevices.defaultInputID(), false)
     }
 
-    private func startOnQueue(uid: String?, keepSamples: Bool, onFailure: @escaping @MainActor () -> Void) {
-        guard !running else { return }
+    /// Returns the error when the microphone could not be opened, nil when it runs.
+    private func startOnQueue(uid: String?, keepSamples: Bool) -> Error? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard !running else { return nil }
         // Set here, behind any stop still queued, which resets both.
         lock.lock()
         samples = []
@@ -223,14 +321,15 @@ final class AudioCapture: @unchecked Sendable {
             } catch {
                 Debug.log("microphone start failed: \(error)")
                 engine = nil
-                DispatchQueue.main.async { MainActor.assumeIsolated { onFailure() } }
-                return
+                return error
             }
         }
         running = true
+        return nil
     }
 
     private func configurationChanged(_ source: ObjectIdentifier?) {
+        dispatchPrecondition(condition: .onQueue(queue))
         guard let engine, source == ObjectIdentifier(engine) else { return }
         guard running else {
             engineStale = true
@@ -250,6 +349,7 @@ final class AudioCapture: @unchecked Sendable {
     }
 
     private func startEngine() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
         guard let engine else { return }
         let input = engine.inputNode
         if let uid = currentUID, var deviceID = AudioDevices.deviceID(forUID: uid), let unit = input.audioUnit {
@@ -258,14 +358,12 @@ final class AudioCapture: @unchecked Sendable {
                 &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size))
         }
         let inputFormat = input.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw NSError(domain: "Saywrite", code: 1, userInfo: [NSLocalizedDescriptionKey: "Kein Mikrofon gefunden"])
-        }
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { throw AudioCaptureError.noMicrophone }
         // Each tap owns its converter: after a device change the old engine may still deliver a
         // buffer in the old format while the new one starts, so a shared converter would be raced
         // and fed the wrong format.
         guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw NSError(domain: "Saywrite", code: 2, userInfo: [NSLocalizedDescriptionKey: "Audioformat nicht unterstützt"])
+            throw AudioCaptureError.unsupportedFormat
         }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
@@ -276,6 +374,7 @@ final class AudioCapture: @unchecked Sendable {
     }
 
     private func stopOnQueue() -> [Float] {
+        dispatchPrecondition(condition: .onQueue(queue))
         deferred = nil
         if running, let engine {
             engine.inputNode.removeTap(onBus: 0)

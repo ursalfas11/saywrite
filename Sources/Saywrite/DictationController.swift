@@ -85,8 +85,8 @@ final class DictationController {
     private var keysSinceInsert = 0
     /// The session that stopped by itself (silence or maximum length): its text is not inserted.
     private var autoStoppedSession: UUID?
-    /// The session whose microphone failed to start after the key was already released.
-    private var microphoneFailedSession: UUID?
+    /// The session whose microphone failed to start after the key was already released, and why.
+    private var microphoneFailure: (id: UUID, error: Error)?
     /// The text of the current dictation once it is ready and waits for its paste, so a cancel by the
     /// system (sleep, lock, user switch) can keep it in the history.
     private var readyResult: (id: UUID, result: DictationResult)?
@@ -502,6 +502,13 @@ final class DictationController {
             return
         }
 
+        // An earlier start is still stuck in Core Audio: say so right away instead of waiting again.
+        guard !audio.isStuck else {
+            hotkeys.reset()
+            showMicrophoneError(AudioCaptureError.notResponding)
+            return
+        }
+
         sessionID = UUID()
         secureFieldSeen = false
         sessionApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -532,12 +539,14 @@ final class DictationController {
         }
         audio.setSampleHandler { chunk in continuation.yield(chunk) }
         // Starts in the background: this runs inside the key handling, which every key press of the
-        // user waits for. Only rewrite needs the whole recording at the end.
+        // user waits for. Only rewrite needs the whole recording at the end. Core Audio can hang
+        // (12.11.2026: hours inside `AVAudioEngine.inputNode` after a device change); the start has a
+        // deadline, so hotkeys and the panel keep working and the failure handler says so.
         let id = sessionID
         audio.start(
             deviceUID: settings.inputDeviceUID.isEmpty ? nil : settings.inputDeviceUID,
             keepSamples: action == .rewrite, deferBluetooth: true
-        ) { [weak self] in self?.audioStartFailed(id) }
+        ) { [weak self] error in self?.audioStartFailed(error, id: id) }
         phase = .recording(action)
         recordingStart = Date()
         lastVoice = Date()
@@ -549,26 +558,56 @@ final class DictationController {
         startPreview(session: session, segmenter: segmenter, id: sessionID)
     }
 
-    private func audioStartFailed(_ id: UUID) {
+    private func audioStartFailed(_ error: Error, id: UUID) {
+        Debug.log("audio start failed: \(error)")
         guard sessionID == id else { return }
-        guard case .recording = phase else {
+        switch phase {
+        case .recording:
+            hotkeys.reset()
+            cancel()
+            showMicrophoneError(error)
+        case .processing:
             // Already released (a deferred Bluetooth start, a slow start): the finish reports it
             // instead of "Nothing heard".
-            microphoneFailedSession = id
-            return
+            microphoneFailure = (id, error)
+        case .idle:
+            // A cancelled ⌥ shortcut stays quiet, unless the microphone hangs: that does not go away by itself.
+            if isNotResponding(error) { showMicrophoneError(error) }
         }
-        hotkeys.reset()
-        cancel()
-        showMicrophoneStartError()
     }
 
-    private func showMicrophoneStartError() {
-        if Permissions.microphoneStatus != .granted {
+    private func isNotResponding(_ error: Error) -> Bool {
+        if case AudioCaptureError.notResponding = error { return true }
+        return false
+    }
+
+    /// The microphone error of this session, if its start failed after the key was released, or a
+    /// hang the stop ran into.
+    private func microphoneError(for id: UUID) -> Error? {
+        if let failure = microphoneFailure, failure.id == id { return failure.error }
+        return audio.isStuck ? AudioCaptureError.notResponding : nil
+    }
+
+    private func showMicrophoneError(_ error: Error) {
+        if isNotResponding(error) {
+            showError(
+                L("Microphone not responding – click to restart Saywrite", "Mikrofon antwortet nicht – klicken, um Saywrite neu zu starten"),
+                action: Self.relaunch)
+        } else if Permissions.microphoneStatus != .granted {
             showError(L("No microphone access", "Mikrofon-Zugriff fehlt"), action: Permissions.openMicrophoneSettings,
                       actionTitle: L("Open settings", "Einstellungen öffnen"))
         } else {
             showError(L("Microphone could not start", "Mikrofon konnte nicht starten"), action: nil)
         }
+    }
+
+    /// A thread stuck in Core Audio cannot be stopped from inside the process; a fresh start clears it.
+    private static func relaunch() {
+        let reopen = Process()
+        reopen.executableURL = URL(fileURLWithPath: "/bin/sh")
+        reopen.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        try? reopen.run()
+        NSApp.terminate(nil)
     }
 
     private func showRecordingOverlay(_ action: HotkeyAction, handsFree: Bool) {
@@ -795,8 +834,8 @@ final class DictationController {
         guard sessionID == id else { return }
         timing?.textReady = Date()
         guard let result = finished else {
-            if microphoneFailedSession == id {
-                showMicrophoneStartError()
+            if let error = microphoneError(for: id) {
+                showMicrophoneError(error)
             } else if peakLevel < 0.05 {
                 showError(L("No sound from the microphone – check the input device", "Kein Ton vom Mikrofon – Eingabegerät prüfen"),
                           action: Permissions.openMicrophoneSettings)
@@ -964,8 +1003,8 @@ final class DictationController {
         if samples.count >= 16_000 / 3 { instruction = try? await transcriber.transcribe(samples) }
         guard sessionID == id else { return }
         guard let instruction, !instruction.trimmingCharacters(in: .whitespaces).isEmpty else {
-            if microphoneFailedSession == id {
-                showMicrophoneStartError()
+            if let error = microphoneError(for: id) {
+                showMicrophoneError(error)
                 return
             }
             overlay.show(.notice(L("Instruction not understood – please say it again", "Anweisung nicht verstanden – nochmal sprechen"), symbol: "questionmark.bubble"))
