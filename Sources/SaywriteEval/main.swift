@@ -34,9 +34,12 @@ final class TimedLLM: LLMClient, @unchecked Sendable {
     func prewarm(forRewrite: Bool) async { await inner.prewarm(forRewrite: forRewrite) }
     func rewrite(selection: String, instruction: String) async throws -> String { selection }
     func cleanup(text: String, style: Style, language: DictationLanguage) async throws -> String {
+        try await cleanup(text: text, style: style, language: language, keepingWords: false)
+    }
+    func cleanup(text: String, style: Style, language: DictationLanguage, keepingWords: Bool) async throws -> String {
         let start = Date()
         do {
-            let out = try await inner.cleanup(text: text, style: style, language: language)
+            let out = try await inner.cleanup(text: text, style: style, language: language, keepingWords: keepingWords)
             record(Date().timeIntervalSince(start), "LLM \(text) -> \(out)")
             return out
         } catch {

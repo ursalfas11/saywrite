@@ -198,7 +198,7 @@ public actor DictationSession {
             do {
                 guard !breaker.isOpen else { throw LLMError.unreachable }
                 let (lead, body) = Self.splitLeadingBreak(unit)
-                let improved = try await llm.cleanup(text: body, style: style, language: language)
+                let improved = try await llm.cleanup(text: body, style: style, language: language, keepingWords: !isCorrection)
                 Debug.log("llm: \(Debug.text(body)) -> \(Debug.text(improved))")
                 // Without a correction the model may only add punctuation; changed words fall back.
                 guard isCorrection || LLMOutputGuard.sameWords(body, improved) else { throw LLMError.rejectedOutput }
@@ -232,12 +232,17 @@ public actor DictationSession {
         var units: [String] = []
         for segment in spoken {
             var segmentUnits = segment.units
-            if segment.continuesPrevious, !units.isEmpty, let first = segmentUnits.first, CleanupGate.correctsPrevious(first, previous: units.last, language: language) {
-                // "am Donnerstag, | nein, am Freitag": keep apart so the correction pass below sees it.
-                units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1])
-            } else if segment.continuesPrevious, !units.isEmpty, !segmentUnits.isEmpty {
+            // A cut without a pause, or a pause the recognizer took for a sentence end (not when the
+            // segment starts with a spoken line break).
+            let continues = segment.continuesPrevious
+                || (Self.startsMidSentence(segment.raw, after: units.last, language: language) && segmentUnits.first?.hasPrefix("\n") == false)
+            if continues, !units.isEmpty, let first = segmentUnits.first, CleanupGate.correctsPrevious(first, previous: units.last, language: language) {
+                // "am Donnerstag, | nein, am Freitag": keep apart so the correction pass below sees it. After a
+                // pause the period stays, so the text reads right if the model is off or fails.
+                if segment.continuesPrevious { units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1], following: first) }
+            } else if continues, !units.isEmpty, !segmentUnits.isEmpty {
                 // Cut mid-sentence: glue the halves back together.
-                units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1])
+                units[units.count - 1] = Self.dropFalsePeriod(units[units.count - 1], following: segmentUnits[0])
                 segmentUnits[0] = Self.lowercaseContinuation(segmentUnits[0])
                 units[units.count - 1] += " " + segmentUnits.removeFirst()
             }
@@ -277,7 +282,7 @@ public actor DictationSession {
 
         let raw = Self.join(spoken.map(\.raw))
         let plain = RuleCleaner.finalize(Self.join(units), style: style, language: language)
-        guard !plain.isEmpty else { return nil }
+        guard !plain.isEmpty, !Self.onlyFillers(raw, language: language) else { return nil }
         let (final, replacementCount) = ReplacementEngine.apply(replacements, to: plain)
 
         let summary = ChangeSummarizer.summarize(
@@ -351,6 +356,11 @@ public actor DictationSession {
     /// "Ich komme um fünf." + "Nein, um sechs." or "am Donnerstag" + "nein, am Freitag".
     static func joinForCorrection(_ previous: String, _ correction: String) -> String {
         guard let last = previous.last else { return correction }
+        // "am 12." + "nein, am 13.": the period of an ordinal or date is no sentence end, the comma still goes in.
+        if last == ".", let token = previous.split(whereSeparator: { $0.isWhitespace }).last,
+           RuleCleaner.isNonTerminalPeriod(token, following: Substring(correction)) {
+            return previous + ", " + correction
+        }
         return ".?!,;:".contains(last) ? previous + " " + correction : previous + ", " + correction
     }
 
@@ -360,8 +370,45 @@ public actor DictationSession {
         return (lead, String(text.dropFirst(lead.count)))
     }
 
-    static func dropFalsePeriod(_ text: String) -> String {
-        text.hasSuffix(".") && !text.hasSuffix("..") ? String(text.dropLast()) : text
+    /// The recognizer starts every segment with a capital; one that starts lowercase after a pause
+    /// continues the sentence before it ("Bitte prüfe den Bericht." | "und schicke ihn weiter."). Only
+    /// after a plain period: "?", "!" and "..." end a sentence on purpose, and the period of "usw." stays.
+    /// "iPhone" or "github.com" start lowercase anyway. A filler in front ("ähm, ich schicke ihn morgen.",
+    /// "um, we send it tomorrow.") marks a fresh start after the pause, not the rest of the sentence.
+    static func startsMidSentence(_ raw: String, after previous: String?, language: DictationLanguage = .german) -> Bool {
+        guard let previous, previous.hasSuffix("."), !previous.hasSuffix(".."),
+              let last = previous.split(whereSeparator: { $0.isWhitespace }).last,
+              !RuleCleaner.abbreviations.contains(last.lowercased()),
+              let first = raw.split(whereSeparator: { $0.isWhitespace }).first,
+              first.first?.isLowercase == true, !RuleCleaner.isBrandToken(first),
+              !isFiller(LLMOutputGuard.words(String(first)).first ?? "", language: language) else { return false }
+        return true
+    }
+
+    /// English fillers that are German words too ("um acht", "er kommt"): fillers only in English.
+    static let germanWordFillers: Set<String> = ["um", "er"]
+
+    static func isFiller(_ word: String, language: DictationLanguage) -> Bool {
+        RuleCleaner.fillerWords.contains(word) && (language == .english || !germanWordFillers.contains(word))
+    }
+
+    /// "Um." or "Ähm, äh." alone: a hesitation the recognizer wrote down, nothing to insert (not even the
+    /// period left over). Checked on what was said with the fillers of both languages, since the rules
+    /// remove only the fillers of one language and the language of two letters is a guess. "Er." is a
+    /// German answer ("Wer kommt?" – "Er."), a hesitation only in English; "Um." alone is no German
+    /// sentence either, so it stays a hesitation in both.
+    static func onlyFillers(_ text: String, language: DictationLanguage = .german) -> Bool {
+        let words = LLMOutputGuard.words(text)
+        return !words.isEmpty && words.allSatisfy { isFiller($0, language: language) || $0 == "um" }
+    }
+
+    /// Drops the period the recognizer set at a cut. The period of an ordinal, a date or an abbreviation
+    /// stays ("am 15." + "um 10 Uhr", "in den U.S.A." + "und Kanada").
+    static func dropFalsePeriod(_ text: String, following: String = "") -> String {
+        guard text.hasSuffix("."), !text.hasSuffix(".."),
+              let last = text.split(whereSeparator: { $0.isWhitespace }).last,
+              !RuleCleaner.isNonTerminalPeriod(last, following: Substring(following)) else { return text }
+        return String(text.dropLast())
     }
 
     /// Words that are only capitalized because the recognizer thought a sentence started there.

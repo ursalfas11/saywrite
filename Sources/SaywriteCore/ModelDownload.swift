@@ -106,11 +106,17 @@ extension ModelDownloadError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .notEnoughDiskSpace(let needed, let available):
-            return "Not enough disk space (\(needed / 1_000_000) MB needed, \(available / 1_000_000) MB free)"
-        case .http(let status): return "The server answered with status \(status)"
-        case .incomplete: return "The download was interrupted"
-        case .hashMismatch: return "The downloaded file is corrupted"
-        case .unexpectedResponse: return "The server did not send the model file"
+            let neededText = ByteSize.text(needed), availableText = ByteSize.text(available)
+            return UILanguage.text("Not enough disk space (\(neededText) needed, \(availableText) free)",
+                                   de: "Nicht genug Speicherplatz (\(neededText) nötig, \(availableText) frei)")
+        case .http(let status):
+            return UILanguage.text("The server answered with status \(status)", de: "Der Server antwortete mit Status \(status)")
+        case .incomplete:
+            return UILanguage.text("The download was interrupted", de: "Der Download wurde unterbrochen")
+        case .hashMismatch:
+            return UILanguage.text("The downloaded file is corrupted", de: "Die heruntergeladene Datei ist beschädigt")
+        case .unexpectedResponse:
+            return UILanguage.text("The server did not send the model file", de: "Der Server hat nicht die Modelldatei geschickt")
         case .network(let message): return message
         }
     }

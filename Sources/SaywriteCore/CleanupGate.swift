@@ -82,12 +82,15 @@ public enum CleanupGate {
     ]
 
     /// "Ich meine, …" / "I mean, …" at a sentence start, whatever follows. On its own that is mostly an
-    /// opinion ("Ich meine, ich fand es trotzdem schön"); see `correctsPrevious`.
-    static let echoMarker = #"^(?:(?:aber|sorry|entschuldigung|pardon)\s*,?\s+)?(?:ich meine|besser gesagt|oder besser)\s*,"#
-    static let englishEchoMarker = #"^(?:(?:sorry|oh)\s*,?\s+)?(?:i mean|or rather)\s*,"#
+    /// opinion ("Ich meine, ich fand es trotzdem schön"); see `correctsPrevious`. "Nein, ich meine, …"
+    /// is the most common way to start over after a pause.
+    static let echoLead = #"(?:(?:aber|sorry|entschuldigung|pardon|(?:(?:ach|oh|oder|aber)\s+)?(?:nein|nee))\s*,?\s+)?"#
+    static let englishEchoLead = #"(?:(?:sorry|oh|(?:oh\s+)?no)\s*,?\s+)?"#
+    static let echoMarker = "^" + echoLead + #"(?:ich meine|besser gesagt|oder besser)\s*,"#
+    static let englishEchoMarker = "^" + englishEchoLead + #"(?:i mean|or rather)\s*,"#
     /// The same marker inside a joined text, for finding where the new version starts.
-    static let echoTail = #"(?:^|[.!?]\s+)(?:ich meine|besser gesagt|oder besser)\s*,\s*\S"#
-    static let englishEchoTail = #"(?:^|[.!?]\s+)(?:i mean|or rather)\s*,\s*\S"#
+    static let echoTail = #"(?:^|[.!?]\s+)"# + echoLead + #"(?:ich meine|besser gesagt|oder besser)\s*,\s*\S"#
+    static let englishEchoTail = #"(?:^|[.!?]\s+)"# + englishEchoLead + #"(?:i mean|or rather)\s*,\s*\S"#
 
     /// Whether `sentence` corrects `previous`: a marker at its start, or "Ich meine, …" that repeats
     /// the sentence before ("Ich möchte fünf Systeme bauen." + "Ich meine, ich will sechs Systeme bauen.").
@@ -289,6 +292,10 @@ public enum CleanupGate {
     }
 
     static func containsCorrection(_ text: String, language: DictationLanguage = .german) -> Bool {
+        // "Nein, ich meine, …" at the start can only correct the sentence before, which the model does not
+        // see here: `correctsPrevious` handles it with that sentence. Alone, the marker is no reason to
+        // ask the model (it may only drop the marker, which the guard refuses anyway).
+        let text = withoutLeadingEchoMarker(text, language: language)
         let lower = text.lowercased()
         let patterns = language == .english ? englishCorrectionPatterns : correctionPatterns
         if patterns.contains(where: { lower.range(of: $0, options: .regularExpression) != nil }) { return true }
@@ -305,6 +312,12 @@ public enum CleanupGate {
         let name = String(text[match].lowercased().split(whereSeparator: { !$0.isLetter }).last ?? "")
         let polite: Set<String> = ["danke", "bitte", "thanks", "thank", "please"]
         return !polite.contains(name)
+    }
+
+    static func withoutLeadingEchoMarker(_ text: String, language: DictationLanguage) -> String {
+        let pattern = "(?i)" + (language == .english ? englishEchoMarker : echoMarker)
+        guard let marker = text.range(of: pattern, options: .regularExpression) else { return text }
+        return String(text[marker.upperBound...]).trimmingCharacters(in: .whitespaces)
     }
 
     static func longestRunWithoutPunctuation(_ text: String) -> Int {

@@ -15,7 +15,67 @@ public protocol LLMClient: Sendable {
     /// Start loading the model so the next request does not pay the cold start. Fire and forget.
     func prewarm(forRewrite: Bool) async
     func cleanup(text: String, style: Style, language: DictationLanguage) async throws -> String
+    /// `keepingWords`: the text has no self-correction, so the answer may only change punctuation and
+    /// capitalization. A backend that generates locally stops an answer as soon as it leaves the words.
+    func cleanup(text: String, style: Style, language: DictationLanguage, keepingWords: Bool) async throws -> String
     func rewrite(selection: String, instruction: String) async throws -> String
+}
+
+extension LLMClient {
+    /// Backends that cannot stop early check the whole answer afterwards (`LLMOutputGuard.sameWords`).
+    public func cleanup(text: String, style: Style, language: DictationLanguage, keepingWords: Bool) async throws -> String {
+        try await cleanup(text: text, style: style, language: language)
+    }
+}
+
+/// Checks a cleanup answer while it is generated. Without a self-correction the session accepts only an
+/// answer with the input's words in the same order (`LLMOutputGuard.sameWords`); an answer that leaves
+/// them is stopped early instead of running to the end and being thrown away.
+/// Never stricter than that final check: what `sanitize` removes (the prompt's tags, a leading "->",
+/// quotes) and symbols are ignored, and the last word may still be incomplete.
+public struct WordPrefixGuard: Sendable {
+    let expected: [String]
+
+    public init(input: String) {
+        expected = Self.words(input).map(\.word)
+    }
+
+    /// False once `partial` (the answer so far) can no longer end with the input's words.
+    public func allows(_ partial: String) -> Bool {
+        var text = partial
+        for tag in LLMOutputGuard.promptTags {
+            text = text.replacingOccurrences(of: "<\(tag)>", with: "").replacingOccurrences(of: "</\(tag)>", with: "")
+        }
+        // A tag still being written ("</dikt") is judged once it is complete.
+        if let open = text.lastIndex(of: "<"), !text[open...].contains(">") { text = String(text[..<open]) }
+        let words = Self.words(text)
+        guard words.count <= expected.count else { return false }
+        for (index, item) in words.enumerated() {
+            guard item.complete ? item.word == expected[index] : Self.canExtend(item.word, to: expected[index]) else { return false }
+        }
+        return true
+    }
+
+    /// Prefix test on the decomposed scalars, like `sameWords` compares canonically: an answer cut between
+    /// a letter and its accent ("Cafe" + U+0301, "U" + U+0308) can still become the expected word, and
+    /// precomposed and decomposed forms of a letter are the same.
+    static func canExtend(_ partial: String, to word: String) -> Bool {
+        word.decomposedStringWithCanonicalMapping.unicodeScalars
+            .starts(with: partial.decomposedStringWithCanonicalMapping.unicodeScalars)
+    }
+
+    private static let ignored = CharacterSet.punctuationCharacters.union(.symbols)
+
+    /// Lowercased words without surrounding punctuation and symbols; the last one is incomplete unless
+    /// whitespace follows it.
+    static func words(_ text: String) -> [(word: String, complete: Bool)] {
+        let parts = text.lowercased().split(whereSeparator: { $0.isWhitespace })
+        let open = text.last.map { !$0.isWhitespace } ?? false
+        return parts.enumerated().compactMap { index, part in
+            let word = part.trimmingCharacters(in: ignored)
+            return word.isEmpty ? nil : (word, !(open && index == parts.count - 1))
+        }
+    }
 }
 
 /// Guards against a small model answering, summarizing or hallucinating instead of correcting.
@@ -50,11 +110,13 @@ public final class LLMCircuitBreaker: @unchecked Sendable {
 }
 
 public enum LLMOutputGuard {
+    /// The tags around the parts of a prompt, which a model sometimes repeats in its answer.
+    static let promptTags = ["diktat", "vorher", "text", "anweisung", "dictation", "instruction"]
 
     /// `input` is the text the model was given: quotes that the dictation itself opened with stay.
     public static func sanitize(_ output: String, input: String = "") -> String {
         var result = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        for tag in ["diktat", "vorher", "text", "anweisung", "dictation", "instruction"] {
+        for tag in promptTags {
             result = result.replacingOccurrences(of: "<\(tag)>", with: "")
             result = result.replacingOccurrences(of: "</\(tag)>", with: "")
         }

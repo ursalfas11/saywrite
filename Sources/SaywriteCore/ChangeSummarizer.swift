@@ -81,7 +81,10 @@ public enum ChangeSummarizer {
         for (r, f) in pairs {
             matchedRaw.insert(r)
             matchedFinal.insert(f)
-            if trailingPunctuation(rawTokens[r]) != trailingPunctuation(finalTokens[f]) { punctuation += 1 }
+            // A capital added or removed ("und" -> "Und" at a sentence start) is a visible change too,
+            // counted with the punctuation, once per word.
+            if trailingPunctuation(rawTokens[r]) != trailingPunctuation(finalTokens[f])
+                || bare(rawTokens[r]) != bare(finalTokens[f]) { punctuation += 1 }
         }
 
         var fillerCount = 0
@@ -109,9 +112,13 @@ public enum ChangeSummarizer {
         text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
     }
 
-    /// Lowercased token without surrounding punctuation. Capitalization changes are not counted.
+    /// Lowercased token without surrounding punctuation, for matching words; see `bare` for the case.
     static func word(_ token: String) -> String {
-        token.lowercased().trimmingCharacters(in: .punctuationCharacters)
+        bare(token).lowercased()
+    }
+
+    static func bare(_ token: String) -> String {
+        token.trimmingCharacters(in: .punctuationCharacters)
     }
 
     static func trailingPunctuation(_ token: String) -> String {

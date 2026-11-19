@@ -26,6 +26,13 @@ public enum DictationLanguage: String, CaseIterable, Sendable {
         }
     }
 
+    /// The language hint for the recognizer, from the setting. Parakeet uses it only to skip tokens of
+    /// another script (Latin, Cyrillic, Greek), it does not pick a language. "Automatic" means German or
+    /// English, both Latin: without a hint a short or unclear clip may come out Cyrillic ("Тест.").
+    public static func recognizerHint(setting: String) -> String {
+        setting == "auto" || setting.isEmpty ? DictationLanguage.german.rawValue : setting
+    }
+
     /// Written by the session's segment tasks, read on the main thread when priming the model.
     public static var lastDetected: DictationLanguage? {
         get {
